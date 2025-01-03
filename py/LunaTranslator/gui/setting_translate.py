@@ -10,12 +10,11 @@ from myutils.utils import (
     dynamicapiname,
 )
 from gui.pretransfile import sqlite2json
-from gui.inputdialog import autoinitdialog, autoinitdialog_items, autoinitdialogx
+from gui.inputdialog import autoinitdialog, autoinitdialog_items
 from gui.usefulwidget import (
     D_getspinbox,
     getIconButton,
     D_getcolorbutton,
-    Prompt_dialog,
     getcolorbutton,
     getsimpleswitch,
     D_getIconButton,
@@ -26,6 +25,7 @@ from gui.usefulwidget import (
     makescrollgrid,
 )
 from gui.dynalang import LPushButton, LLabel, LAction
+from gui.setting_about import offlinelinks
 
 
 def deepcopydict(d):
@@ -58,7 +58,7 @@ def splitapillm(l):
 def loadvisinternal(btnplus, copy):
     __vis = []
     __uid = []
-    lixians, pre, mianfei, develop, shoufei = splittranslatortypes()
+    lixians, pre, mianfei, shoufei = splittranslatortypes()
     if btnplus == "api":
         is_gpt_likes, not_is_gpt_like = splitapillm(shoufei)
     elif btnplus == "offline":
@@ -113,44 +113,57 @@ def getalistname(parent, copy, btnplus, callback):
         }
     )
     autoinitdialog(
-        parent,
-        __d,
-        ("删除" if copy else "复制") + "接口",
-        600,
-        __,
+        parent, __d, ("删除" if copy else "复制") + "接口", 600, __, exec_=True
     )
 
 
-def renameapi(qlabel: QLabel, apiuid, _):
+def renameapi(qlabel: QLabel, apiuid, self, countnum, btnplus, _):
     menu = QMenu(qlabel)
     editname = LAction("重命名")
+    delete = LAction("删除")
     menu.addAction(editname)
+    which = translate_exits(apiuid, which=True)
+    if which == 1:
+        menu.addAction(delete)
     action = menu.exec(qlabel.mapToGlobal(_))
+    if action == delete:
+        selectllmcallback_2(self, countnum, btnplus, apiuid, None)
     if action == editname:
         before = dynamicapiname(apiuid)
-        _dia = Prompt_dialog(
-            qlabel,
-            "重命名",
-            "",
-            [
-                [
-                    "名称",
-                    before,
-                ],
-            ],
-        )
+        __d = {"k": before}
 
-        if _dia.exec():
-            title = _dia.text[0].text()
+        def cb(__d):
+            title = __d["k"]
             if title not in ("", before):
                 globalconfig["fanyi"][apiuid]["name_self_set"] = title
                 qlabel.setText(title)
 
+        autoinitdialog(
+            self,
+            __d,
+            "重命名",
+            600,
+            [
+                {
+                    "type": "lineedit",
+                    "name": "名称",
+                    "k": "k",
+                },
+                {
+                    "type": "okcancel",
+                    "callback": functools.partial(cb, __d),
+                },
+            ],
+            exec_=True,
+        )
 
-def getrenameablellabel(uid):
+
+def getrenameablellabel(uid, self, countnum, btnplus):
     name = LLabel(dynamicapiname(uid))
     name.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-    name.customContextMenuRequested.connect(functools.partial(renameapi, name, uid))
+    name.customContextMenuRequested.connect(
+        functools.partial(renameapi, name, uid, self, countnum, btnplus)
+    )
     return name
 
 
@@ -161,7 +174,9 @@ def loadbutton(self, fanyi):
         aclass = "translator." + fanyi
     elif which == 1:
         aclass = "userconfig.copyed." + fanyi
-    return autoinitdialogx(
+    else:
+        return
+    return autoinitdialog(
         self,
         translatorsetting[fanyi]["args"],
         dynamicapiname(fanyi),
@@ -200,7 +215,7 @@ def selectllmcallback(self, countnum, btnplus, fanyi, name):
         icon="fa.gear",
     )
 
-    name = getrenameablellabel(uid)
+    name = getrenameablellabel(uid, self, countnum, btnplus)
     swc = getsimpleswitch(
         globalconfig["fanyi"][uid],
         "use",
@@ -222,18 +237,18 @@ def selectllmcallback(self, countnum, btnplus, fanyi, name):
         ),
     )
 
-    if len(countnum) % 3 == 0:
+    offset = 5 * (len(countnum) % 3)
+    layout.addWidget(name, layout.rowCount() - 1, offset + 0)
+    layout.addWidget(swc, layout.rowCount() - 1, offset + 1)
+    layout.addWidget(color, layout.rowCount() - 1, offset + 2)
+    layout.addWidget(last, layout.rowCount() - 1, offset + 3)
+    if len(countnum) % 3 != 2:
+        layout.addWidget(QLabel(), layout.rowCount() - 1, offset + 4)
+
+    else:
         layout.addWidget(
             getattr(self, "btnmany" + btnplus), layout.rowCount(), 5 * 2, 1, 4
         )
-    offset = 5 * (len(countnum) % 3)
-    layout.addWidget(name, layout.rowCount() - 2, offset + 0)
-    layout.addWidget(swc, layout.rowCount() - 2, offset + 1)
-    layout.addWidget(color, layout.rowCount() - 2, offset + 2)
-    layout.addWidget(last, layout.rowCount() - 2, offset + 3)
-    if len(countnum) % 3 != 2:
-        layout.addWidget(QLabel(), layout.rowCount() - 2, offset + 4)
-
     countnum.append(uid)
 
 
@@ -361,7 +376,7 @@ def initsome11(self, l, label=None, btnplus=False):
         else:
             last = ""
         line += [
-            functools.partial(getrenameablellabel, fanyi),
+            functools.partial(getrenameablellabel, fanyi, self, countnum, btnplus),
             D_getsimpleswitch(
                 globalconfig["fanyi"][fanyi],
                 "use",
@@ -393,12 +408,12 @@ def initsome11(self, l, label=None, btnplus=False):
     if len(line):
         grids.append(line)
     if btnplus:
-        grids.append(
-            [
-                ("", 10),
-                (functools.partial(createmanybtn, self, countnum, btnplus), 4),
-            ]
-        )
+
+        if i % 3 == 0:
+            grids.append([])
+        if i % 3 != 2:
+            grids[-1].append(("", 5 * (2 - i % 3)))
+        grids[-1].append((functools.partial(createmanybtn, self, countnum, btnplus), 4))
 
     return grids
 
@@ -432,7 +447,6 @@ def initsome2(self, l, label=None, btnplus=None):
         ],
     ]
     return grids
-
 
 
 def createbtnexport(self):
@@ -512,20 +526,11 @@ def setTabTwo_lazy(self, basel: QVBoxLayout):
         ],
         [],
     ]
-    _items = [
-        {
-            "type": "file",
-            "dir": False,
-            "filter": "*.exe",
-            "name": "Chromium_路径",
-            "k": "chromepath",
-        },
-        {"type": "okcancel"},
-    ]
 
-    lixians, pre, mianfei, develop, shoufei = splittranslatortypes()
+    lixians, pre, mianfei, shoufei = splittranslatortypes()
 
     offlinegrid = initsome2(self, lixians, btnplus="offline")
+    offlinegrid += [[functools.partial(offlinelinks, "translate")]]
     onlinegrid = initsome11(self, mianfei)
     online_reg_grid += initsome2(self, shoufei, btnplus="api")
     pretransgrid += initsome11(self, pre)

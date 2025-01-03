@@ -257,16 +257,14 @@ _MoveWindow.argtypes = c_int, c_int, c_int, c_int, c_int, c_bool
 
 SetForegroundWindow = _user32.SetForegroundWindow
 SetForegroundWindow.argtypes = (HWND,)
-_GetClientRect = _user32.GetClientRect
-_GetClientRect.argtypes = c_int, POINTER(RECT)
 
 FindWindow = _user32.FindWindowW
 FindWindow.argtypes = LPCWSTR, LPCWSTR
 FindWindow.restype = HWND
 SetFocus = _user32.SetFocus
 SetFocus.argtypes = (HWND,)
-_EnumWindows = _user32.EnumWindows
-_EnumWindows.argtypes = WNDENUMPROC, c_void_p
+GetFocus = _user32.GetFocus
+GetFocus.restype = HWND
 _ShellExecuteW = _shell32.ShellExecuteW
 _ShellExecuteW.argtypes = c_void_p, c_wchar_p, c_wchar_p, c_wchar_p, c_wchar_p, c_int
 _OpenProcess = _kernel32.OpenProcess
@@ -274,8 +272,8 @@ _OpenProcess.argtypes = c_uint, c_bool, c_uint
 CloseHandle = _kernel32.CloseHandle
 CloseHandle.argtypes = (HANDLE,)
 CloseHandle.restype = BOOL
-_SendMessage = _user32.SendMessageW
-_SendMessage.argtypes = c_int, c_uint, c_void_p, c_void_p
+SendMessage = _user32.SendMessageW
+SendMessage.argtypes = c_int, c_uint, c_void_p, c_void_p
 _keybd_event = _user32.keybd_event
 _keybd_event.argtypes = c_byte, c_byte, c_uint, c_void_p
 RegisterWindowMessage = _user32.RegisterWindowMessageW
@@ -283,8 +281,6 @@ RegisterWindowMessage.argtypes = (LPCWSTR,)
 RegisterWindowMessage.restype = UINT
 _GetWindowThreadProcessId = _user32.GetWindowThreadProcessId
 _GetWindowThreadProcessId.argtypes = HWND, c_void_p
-GetClipboardOwner = _user32.GetClipboardOwner
-GetClipboardOwner.restype = HWND
 try:
     _GetModuleFileNameExW = _psapi.GetModuleFileNameExW
 except:
@@ -472,22 +468,6 @@ def GetWindowRect(hwnd):
         return None
 
 
-def GetClientRect(hwnd):
-    _rect = RECT()
-    _GetClientRect(hwnd, pointer(_rect))
-    return (_rect.left, _rect.top, _rect.right, _rect.bottom)
-
-
-def GetDpiForWindow(hwnd):
-    try:
-        _GetDpiForWindow = _user32.GetDpiForWindow
-        _GetDpiForWindow.argtypes = (HWND,)
-        _GetDpiForWindow.restype = UINT
-        return _GetDpiForWindow(hwnd)
-    except:
-        return 96
-
-
 def GetCursorPos():
     _p = POINT()
     _GetCursorPos(pointer(_p))
@@ -509,20 +489,12 @@ def MoveWindow(hwnd, X, Y, w, h, bRepaint):
     return _MoveWindow(hwnd, X, Y, w, h, bRepaint)
 
 
-def EnumWindows(lpEnumFunc, lParam):
-    return _EnumWindows(WNDENUMPROC(lpEnumFunc), 0)
-
-
 def ShellExecute(hwnd: int, op: str, file: str, params: str, _dir: str, bShow):
     return _ShellExecuteW(hwnd, op, file, params, _dir, bShow)
 
 
 def OpenProcess(dwDesiredAccess, bInheritHandle, dwProcessId):
     return _OpenProcess(dwDesiredAccess, bInheritHandle, dwProcessId)
-
-
-def SendMessage(hwnd, message, wp=None, lp=None):
-    return _SendMessage(hwnd, message, wp, lp)
 
 
 def keybd_event(bVk, bScan, dwFlags, _):
@@ -541,82 +513,20 @@ SetEvent.argtypes = (HANDLE,)
 SetEvent.restype = BOOL
 
 
-class ACLStruct(Structure):
-    _fields_ = [
-        ("AclRevision", c_byte),
-        ("Sbz1", c_byte),
-        ("AclSize", WORD),
-        ("AceCount", WORD),
-        ("Sbz2", WORD),
-    ]
-
-
-class SID_IDENTIFIER_AUTHORITYStruct(Structure):
-    _fields_ = [("Value", c_byte * 6)]
-
-
-class SIDStruct(Structure):
-    _fields_ = [
-        ("Revision", c_byte),
-        ("SubAuthorityCount", c_byte),
-        ("IdentifierAuthority", SID_IDENTIFIER_AUTHORITYStruct),
-        ("SubAuthority", DWORD * 1),
-    ]
-
-
-class SECURITY_DESCRIPTORStruct(Structure):
-    _fields_ = [
-        ("Revision", c_byte),
-        ("Sbz1", c_byte),
-        ("Control", WORD),
-        ("Owner", POINTER(SIDStruct)),
-        ("Group", POINTER(SIDStruct)),
-        ("Sacl", POINTER(ACLStruct)),
-        ("Dacl", POINTER(ACLStruct)),
-    ]
-
-
-class SECURITY_ATTRIBUTESStruct(Structure):
-    _fields_ = [
-        ("nLength", DWORD),
-        ("lpSecurityDescriptor", POINTER(SECURITY_DESCRIPTORStruct)),
-        ("bInheritHandle", BOOL),
-    ]
-
-
-_InitializeSecurityDescriptor = _Advapi32.InitializeSecurityDescriptor
-_InitializeSecurityDescriptor.argtypes = [c_void_p, DWORD]
-_InitializeSecurityDescriptor.restype = BOOL
-_SetSecurityDescriptorDacl = _Advapi32.SetSecurityDescriptorDacl
-_SetSecurityDescriptorDacl.argtypes = [c_void_p, BOOL, c_void_p, BOOL]
-
-
-def get_SECURITY_ATTRIBUTES():
-    sd = SECURITY_DESCRIPTORStruct()
-    _InitializeSecurityDescriptor(pointer(sd), 1)
-
-    _SetSecurityDescriptorDacl(pointer(sd), True, None, False)
-    allacc = SECURITY_ATTRIBUTESStruct()
-    allacc.nLength = sizeof(allacc)
-    allacc.bInheritHandle = False
-    allacc.lpSecurityDescriptor = pointer(sd)
-    return allacc
-
-
 _CreateEventW = _kernel32.CreateEventW
-_CreateEventW.argtypes = POINTER(SECURITY_ATTRIBUTESStruct), c_bool, c_bool, c_wchar_p
+_CreateEventW.argtypes = c_void_p, c_bool, c_bool, c_wchar_p
 
 
-def CreateEvent(bManualReset, bInitialState, lpName, secu=get_SECURITY_ATTRIBUTES()):
-    return _CreateEventW(pointer(secu), bManualReset, bInitialState, lpName)
+def CreateEvent(bManualReset, bInitialState, lpName, psecu=None):
+    return _CreateEventW(psecu, bManualReset, bInitialState, lpName)
 
 
 _CreateMutexW = _kernel32.CreateMutexW
-_CreateMutexW.argtypes = POINTER(SECURITY_ATTRIBUTESStruct), BOOL, LPCWSTR
+_CreateMutexW.argtypes = c_void_p, BOOL, LPCWSTR
 
 
-def CreateMutex(bInitialOwner, lpName, secu=get_SECURITY_ATTRIBUTES()):
-    return _CreateMutexW(pointer(secu), bInitialOwner, lpName)
+def CreateMutex(bInitialOwner, lpName, psecu=None):
+    return _CreateMutexW(psecu, bInitialOwner, lpName)
 
 
 GetLastError = _kernel32.GetLastError
@@ -659,7 +569,7 @@ _CreateFileW.argtypes = (
     c_wchar_p,
     c_uint,
     c_uint,
-    POINTER(SECURITY_ATTRIBUTESStruct),
+    c_void_p,
     c_uint,
     c_uint,
     c_void_p,
@@ -745,15 +655,6 @@ _GetAncestor.restype = HWND
 
 def GetAncestor(hwnd):
     return _GetAncestor(hwnd, GA_ROOT)
-
-
-def GetDpiForWindow(hwnd):
-    try:
-        _GetDpiForWindow = _user32.GetDpiForWindow
-    except:
-        return 96
-
-    return _GetDpiForWindow(hwnd)
 
 
 _ScreenToClient = _user32.ScreenToClient
@@ -860,7 +761,8 @@ IsZoomed = _user32.IsZoomed
 IsZoomed.argtypes = (HWND,)
 IsZoomed.restype = BOOL
 
-WNDPROCTYPE = CFUNCTYPE(INT, HWND, INT, WPARAM, LPARAM)
+WNDPROCTYPE = WINFUNCTYPE(INT, HWND, INT, WPARAM, LPARAM)
+WNDPROCTYPE_1 = CFUNCTYPE(INT, HWND, INT, WPARAM, LPARAM)
 
 GWLP_WNDPROC = -4
 if sizeof(c_void_p) == 8:
@@ -920,7 +822,7 @@ def MonitorFromWindow(hwnd, dwFlags=MONITOR_DEFAULTTONEAREST):
     return _MonitorFromWindow(hwnd, dwFlags)
 
 
-WINEVENTPROC = CFUNCTYPE(
+WINEVENTPROC = WINFUNCTYPE(
     None,
     HANDLE,
     DWORD,
@@ -963,23 +865,3 @@ SetWinEventHook.argtypes = DWORD, DWORD, HMODULE, WINEVENTPROC, DWORD, DWORD, DW
 PathFileExists = windll.Shlwapi.PathFileExistsW
 PathFileExists.argtypes = (LPCWSTR,)
 PathFileExists.restype = BOOL
-
-_SHGetFolderPathW = _shell32.SHGetFolderPathW
-_SHGetFolderPathW.argtypes = (
-    HWND,
-    c_int,
-    HANDLE,
-    DWORD,
-    LPWSTR,
-)
-_SHGetFolderPathW.restype = HRESULT
-CSIDL_MYPICTURES = 0x27
-SHGFP_TYPE_CURRENT = 0
-S_OK = 0
-
-
-def SHGetFolderPathW(csidl):
-    buff = create_unicode_buffer(MAX_PATH + 100)
-    if _SHGetFolderPathW(None, csidl, None, SHGFP_TYPE_CURRENT, buff) != S_OK:
-        return None
-    return buff.value

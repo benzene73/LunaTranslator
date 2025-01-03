@@ -10,15 +10,18 @@ from myutils.config import (
     extradatas,
     globalconfig,
 )
-from myutils.hwnd import clipboard_set_image
-from myutils.utils import str2rgba, get_time_stamp, loopbackrecorder, getimagefilefilter
+from myutils.utils import (
+    get_time_stamp,
+    loopbackrecorder,
+    getimagefilefilter,
+    targetmod,
+)
 from myutils.audioplayer import playonce
 from gui.inputdialog import autoinitdialog
 from gui.specialwidget import stackedlist, shrinkableitem, shownumQPushButton
 from gui.usefulwidget import (
     pixmapviewer,
     statusbutton,
-    Prompt_dialog,
     makesubtab_lazy,
     tabadd_lazy,
     listediter,
@@ -34,16 +37,11 @@ from gui.dialog_savedgame_common import (
     opendirforgameuid,
     getcachedimage,
     getpixfunction,
-    dialog_syssetting,
     addgamesingle,
     addgamebatch,
     addgamebatch_x,
 )
-from gui.dynalang import (
-    LPushButton,
-    LAction,
-    LLabel,
-)
+from gui.dynalang import LAction, LLabel
 
 
 class clickitem(QWidget):
@@ -84,6 +82,11 @@ class clickitem(QWidget):
         self.bottommask.resize(a0.size())
         self.maskshowfileexists.resize(a0.size())
         self.bottomline.resize(a0.size())
+        size = globalconfig["dialog_savegame_layout"]["listitemheight"]
+        margin = min(3, int(size / 15))
+        self.lay1.setContentsMargins(margin, margin, margin, margin)
+        self._.setFixedSize(QSize(size - 2 * margin, size - 2 * margin))
+        self._2.setFixedHeight(size)
 
     def __init__(self, uid):
         super().__init__()
@@ -91,10 +94,8 @@ class clickitem(QWidget):
         self.uid = uid
         self.lay = QHBoxLayout()
         self.lay.setSpacing(0)
-        size = globalconfig["dialog_savegame_layout"]["listitemheight"]
-        margin = min(3, int(size / 15))
         lay1 = QHBoxLayout()
-        lay1.setContentsMargins(margin, margin, margin, margin)
+        self.lay1 = lay1
         self.lay.setContentsMargins(0, 0, 0, 0)
         self.maskshowfileexists = QLabel(self)
         exists = os.path.exists(get_launchpath(uid))
@@ -103,13 +104,16 @@ class clickitem(QWidget):
         self.bottommask.hide()
         self.bottommask.setObjectName("savegame_onselectcolor1")
         _ = QLabel(self)
-        _.setStyleSheet("""background-color: rgba(255,255,255, 0);""")
+        _.setStyleSheet("background:transparent")
         self.bottomline = _
-
         _ = QLabel()
-        _.setFixedSize(QSize(size - 2 * margin, size - 2 * margin))
+        self._ = _
         _.setScaledContents(True)
-        _.setStyleSheet("background-color: rgba(255,255,255, 0);")
+        _.setStyleSheet("background:transparent")
+        for image in savehook_new_data[uid]["imagepath_all"]:
+            fr = extradatas["imagefrom"].get(image)
+            if fr:
+                targetmod.get(fr).dispatchdownloadtask(image)
         icon = getpixfunction(uid, small=True, iconfirst=True)
         icon.setDevicePixelRatio(self.devicePixelRatioF())
         _.setPixmap(icon)
@@ -117,7 +121,7 @@ class clickitem(QWidget):
         self.lay.addLayout(lay1)
         _ = QLabel(savehook_new_data[uid]["title"])
         _.setWordWrap(True)
-        _.setFixedHeight(size)
+        self._2 = _
         _.setObjectName("savegame_textfont2")
         self.lay.addWidget(_)
         self.setLayout(self.lay)
@@ -226,7 +230,7 @@ class MyQListWidget(QListWidget):
                     if not index.data(ImageRequestedRole):
                         self.model().setData(index, True, ImageRequestedRole)
                         image = getcachedimage(index.data(PathRole), True)
-                        if image is None:
+                        if image.isNull():
                             self.takeItem(index.row())
                         else:
                             self.item(index.row()).setIcon(QIcon(image))
@@ -297,7 +301,7 @@ class previewimages(QWidget):
         self.list.takeItem(idx)
         if delfile:
             try:
-                os.remove(path)
+                os.remove(extradatas["localedpath"].get(path, path))
             except:
                 pass
 
@@ -313,7 +317,8 @@ class hoverbtn(LLabel):
     clicked = pyqtSignal()
 
     def mousePressEvent(self, a0: QMouseEvent) -> None:
-        self.clicked.emit()
+        if a0.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
         return super().mousePressEvent(a0)
 
     def __init__(self, *argc):
@@ -348,42 +353,25 @@ class viewpixmap_x(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.pixmapviewer = pixmapviewer(self)
-        self.leftclick = hoverbtn("<-", self)
-        self.rightclick = hoverbtn("->", self)
+        self.pixmapviewer.tolastnext.connect(self.tolastnext)
         self.maybehavecomment = hoverbtn(self)
         self.bottombtn = hoverbtn("开始游戏", self)
         self.bottombtn.clicked.connect(self.startgame)
-        self.leftclick.clicked.connect(lambda: self.tolastnext.emit(-1))
-        self.rightclick.clicked.connect(lambda: self.tolastnext.emit(1))
         self.maybehavecomment.clicked.connect(self.viscomment)
         self.commentedit = QPlainTextEdit(self)
         self.commentedit.textChanged.connect(self.changecommit)
-        self.timenothide = QLabel(self)
-        self.timenothide.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.pathandopen = QPushButton(self)
-        self.pathandopen.clicked.connect(
-            lambda: (
-                os.startfile(os.path.abspath(self.currentimage))
-                if self.currentimage
-                else ""
-            )
-        )
         self.centerwidget = QWidget(self)
         self.centerwidgetlayout = QVBoxLayout()
         audio = QHBoxLayout()
-        self.recordbtn = statusbutton(
-            icons=["fa.microphone", "fa.stop"], colors=["", ""]
-        )
-        self.recordbtn.statuschanged.connect(self.startorendrecord)
+        self.recordbtn = statusbutton(icons=["fa.microphone", "fa.stop"])
+        self.recordbtn.clicked.connect(self.startorendrecord)
         self.centerwidget.setLayout(self.centerwidgetlayout)
-        self.centerwidgetlayout.addWidget(self.timenothide)
-        self.centerwidgetlayout.addWidget(self.pathandopen)
         self.centerwidgetlayout.addWidget(self.commentedit)
         self.centerwidgetlayout.addLayout(audio)
         audio.addWidget(self.recordbtn)
-        self.btnplay = statusbutton(icons=["fa.play", "fa.stop"], colors=["", ""])
+        self.btnplay = statusbutton(icons=["fa.play", "fa.stop"])
         audio.addWidget(self.btnplay)
-        self.btnplay.statuschanged.connect(self.playorstop)
+        self.btnplay.clicked.connect(self.playorstop)
         gobject.baseobject.hualang_recordbtn = self.recordbtn
         self.centerwidget.setVisible(False)
         self.pathview = fadeoutlabel(self)
@@ -409,11 +397,11 @@ class viewpixmap_x(QWidget):
             return False
         return True
 
-    def playorstop(self, idx):
+    def playorstop(self, check):
         if not self.checkplayable():
             return
         mp3 = extradatas["imagerefmp3"][self.currentimage]
-        if idx == 1:
+        if check:
             self.play_context = playonce(mp3, globalconfig["ttscommon"]["volume"])
             self.sigtime = time.time()
 
@@ -429,8 +417,8 @@ class viewpixmap_x(QWidget):
                 return
             self.play_context = None
 
-    def startorendrecord(self, idx):
-        if idx == 1:
+    def startorendrecord(self, check):
+        if check:
             if self.play_context:
                 self.btnplay.click()
             self.btnplay.setEnabled(False)
@@ -443,8 +431,6 @@ class viewpixmap_x(QWidget):
                     return
                 tgt = image + os.path.splitext(path)[1]
                 shutil.copy(path, tgt)
-                if "imagerefmp3" not in extradatas:
-                    extradatas["imagerefmp3"] = {}
                 extradatas["imagerefmp3"][image] = tgt
 
                 self.btnplay.setEnabled(self.checkplayable())
@@ -455,8 +441,6 @@ class viewpixmap_x(QWidget):
             self.recorder = None
 
     def changecommit(self):
-        if "imagecomment" not in extradatas:
-            extradatas["imagecomment"] = {}
         extradatas["imagecomment"][self.currentimage] = self.commentedit.toPlainText()
 
     def viscomment(self):
@@ -466,23 +450,11 @@ class viewpixmap_x(QWidget):
         self.pixmapviewer.resize(e.size())
         self.pathview.resize(e.size().width(), self.pathview.height())
         self.infoview.resize(e.size().width(), self.infoview.height())
-        self.leftclick.setGeometry(
-            0,
-            e.size().height() // 10,
-            e.size().width() // 5,
-            7 * e.size().height() // 10,
-        )
         self.bottombtn.setGeometry(
             e.size().width() // 5,
             7 * e.size().height() // 10,
             3 * e.size().width() // 5,
             3 * e.size().height() // 10,
-        )
-        self.rightclick.setGeometry(
-            4 * e.size().width() // 5,
-            e.size().height() // 10,
-            e.size().width() // 5,
-            7 * e.size().height() // 10,
         )
         self.maybehavecomment.setGeometry(
             e.size().width() // 5, 0, 3 * e.size().width() // 5, e.size().height() // 10
@@ -503,21 +475,21 @@ class viewpixmap_x(QWidget):
 
         self.currentimage = path
         self.centerwidget.setVisible(False)
-        self.pathandopen.setText(path)
         self.pathview.setText(path)
         try:
-            timestamp = get_time_stamp(ct=os.path.getctime(path), ms=False)
+            timestamp = get_time_stamp(
+                ct=os.path.getctime(extradatas["localedpath"].get(path, path)), ms=False
+            )
         except:
             timestamp = None
         self.infoview.setText(timestamp)
         self.commentedit.setPlainText(extradatas.get("imagecomment", {}).get(path, ""))
-        self.timenothide.setText(timestamp)
         if not path:
             pixmap = QPixmap()
         else:
-            pixmap = QPixmap.fromImage(QImage(path))
-            if pixmap is None or pixmap.isNull():
-                pixmap = QPixmap()
+            pixmap = QPixmap.fromImage(
+                QImage(extradatas["localedpath"].get(path, path))
+            )
         self.pixmapviewer.showpixmap(pixmap)
         self.btnplay.setEnabled(self.checkplayable())
 
@@ -586,7 +558,7 @@ class pixwrapper(QWidget):
         deleteimage_x = LAction("删除图片文件")
         hualang = LAction("画廊")
         pos = LAction("位置")
-        if curr and os.path.exists(curr):
+        if curr and os.path.exists(extradatas["localedpath"].get(curr, curr)):
             menu.addAction(setimage)
             menu.addAction(seticon)
             menu.addAction(copyimage)
@@ -600,7 +572,9 @@ class pixwrapper(QWidget):
         if action == deleteimage:
             self.removecurrent(False)
         elif copyimage == action:
-            clipboard_set_image(curr)
+            gobject.baseobject.clipboardhelper.setImage.emit(
+                QImage(extradatas["localedpath"].get(curr, curr))
+            )
         elif action == deleteimage_x:
             self.removecurrent(True)
         elif action == pos:
@@ -643,6 +617,7 @@ class pixwrapper(QWidget):
         self.k = k
         pixmaps = savehook_new_data[k]["imagepath_all"].copy()
         self.previewimages.setpixmaps(pixmaps, savehook_new_data[k]["currentvisimage"])
+        self.pixview.bottombtn.setVisible(os.path.exists(get_launchpath(k)))
 
 
 class dialog_savedgame_v3(QWidget):
@@ -655,8 +630,12 @@ class dialog_savedgame_v3(QWidget):
                 self.righttop.removeTab(1)
             tabadd_lazy(
                 self.righttop,
-                savehook_new_data[k]["title"],
-                lambda v: v.addWidget(dialog_setting_game_internal(self, k)),
+                "设置",
+                lambda v: v.addWidget(
+                    dialog_setting_game_internal(
+                        self, k, keepindexobject=self.keepindexobject
+                    )
+                ),
             )
             self.righttop.setCurrentIndex(currvis)
         except:
@@ -670,13 +649,6 @@ class dialog_savedgame_v3(QWidget):
         else:
             self.currentfocusuid = None
 
-        for _btn, exists in self.savebutton:
-            _able1 = b and (
-                (not exists)
-                or (self.currentfocusuid)
-                and (os.path.exists(get_launchpath(self.currentfocusuid)))
-            )
-            _btn.setEnabled(_able1)
         if self.currentfocusuid:
             self.viewitem(k)
 
@@ -700,7 +672,6 @@ class dialog_savedgame_v3(QWidget):
                 self.reftagid,
                 getreflist(self.reftagid),
             ),
-            1 + globalconfig["dialog_savegame_layout"]["listitemheight"],
         )
         self.stack.directshow()
 
@@ -735,32 +706,8 @@ class dialog_savedgame_v3(QWidget):
         if action == startgame:
             startgamecheck(self, getreflist(self.reftagid), self.currentfocusuid)
         elif addlist == action:
-            _dia = Prompt_dialog(
-                self,
-                "创建列表",
-                "",
-                [
-                    ["名称", ""],
-                ],
-            )
 
-            if _dia.exec():
-
-                title = _dia.text[0].text()
-                if title != "":
-                    i = calculatetagidx(None)
-                    if action == addlist:
-                        tag = {
-                            "title": title,
-                            "games": [],
-                            "uid": str(uuid.uuid4()),
-                            "opened": True,
-                        }
-                        savegametaged.insert(i, tag)
-                        group0, btn = self.createtaglist(
-                            self.stack, title, tag["uid"], True
-                        )
-                        self.stack.insertw(i, group0)
+            self.createlist(True, None)
 
         elif action == delgame:
             self.shanchuyouxi()
@@ -794,6 +741,15 @@ class dialog_savedgame_v3(QWidget):
     def directshow(self):
         self.stack.directshow()
 
+    def callexists(self, _):
+        pass
+
+    def callchange(self):
+        self.stack.setheight(
+            globalconfig["dialog_savegame_layout"]["listitemheight"] + 1
+        )
+        self.stack.directshow_1()
+
     def setstyle(self):
         key = "savegame_textfont2"
         fontstring = globalconfig.get(key, "")
@@ -804,25 +760,36 @@ class dialog_savedgame_v3(QWidget):
             _style += "font-size:{}pt;".format(_f.pointSize())
             _style += 'font-family:"{}";'.format(_f.family())
         style = "#{}{{ {} }}".format(key, _style)
-        for exits in [True, False]:
-            c = globalconfig["dialog_savegame_layout"][
-                ("onfilenoexistscolor1", "backcolor1")[exits]
-            ]
-            c = str2rgba(
-                c,
-                globalconfig["dialog_savegame_layout"][
-                    ("transparentnotexits", "transparent")[exits]
-                ],
-            )
 
-            style += "#savegame_exists{}{{background-color:{};}}".format(exits, c)
+        style += "#savegame_existsTrue{{background-color:{};}}".format(
+            globalconfig["dialog_savegame_layout"]["backcolor2"]
+        )
+        style += "#savegame_existsFalse{{background-color:{};}}".format(
+            globalconfig["dialog_savegame_layout"]["onfilenoexistscolor2"]
+        )
         style += "#savegame_onselectcolor1{{background-color: {};}}".format(
-            str2rgba(
-                globalconfig["dialog_savegame_layout"]["onselectcolor1"],
-                globalconfig["dialog_savegame_layout"]["transparentselect"],
-            )
+            globalconfig["dialog_savegame_layout"]["onselectcolor2"]
         )
         self.setStyleSheet(style)
+
+    def movefocus(self, dx):
+        uid = self.currentfocusuid
+        idx1 = self.reallist[self.reftagid].index(uid)
+        idx2 = (idx1 + dx) % len(self.reallist[self.reftagid])
+        group0 = self.stack.w(calculatetagidx(self.reftagid))
+        if idx1 == 0 and dx == -1:
+            self.stack.verticalScrollBar().setValue(
+                self.stack.verticalScrollBar().maximum()
+            )
+        else:
+            try:
+                self.stack.ensureWidgetVisible(group0.w(idx2))
+            except:
+                pass
+        try:
+            group0.w(idx2).click()
+        except:
+            pass
 
     def __init__(self, parent) -> None:
         super().__init__(parent)
@@ -831,18 +798,47 @@ class dialog_savedgame_v3(QWidget):
         self.currentfocusuid = None
         self.reftagid = None
         self.reallist = {}
-        self.stack = stackedlist()
+        self.keepindexobject = {}
+
+        class ___(stackedlist):
+            def keyPressEvent(self, e: QKeyEvent):
+                if self.ref.currentfocusuid:
+                    if e.key() == Qt.Key.Key_Return:
+                        startgamecheck(
+                            self.ref,
+                            getreflist(self.ref.reftagid),
+                            self.ref.currentfocusuid,
+                        )
+                    elif e.key() == Qt.Key.Key_Delete:
+                        self.ref.shanchuyouxi()
+                    elif e.key() == Qt.Key.Key_Left:
+                        self.ref.moverank(-1)
+                    elif e.key() == Qt.Key.Key_Right:
+                        self.ref.moverank(1)
+                    elif e.key() == Qt.Key.Key_Down:
+                        self.ref.movefocus(1)
+                        return e.ignore()
+                    elif e.key() == Qt.Key.Key_Up:
+                        self.ref.movefocus(-1)
+                        return e.ignore()
+                super().keyPressEvent(e)
+
+        self.stack = ___()
+        self.stack.ref = self
+        self.stack.setheight(
+            globalconfig["dialog_savegame_layout"]["listitemheight"] + 1
+        )
         self.stack.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.stack.customContextMenuRequested.connect(self.stack_showmenu)
-        self.stack.setFixedWidth(
-            globalconfig["dialog_savegame_layout"]["listitemwidth"]
-        )
+
         self.stack.bgclicked.connect(clickitem.clearfocus)
         self.setstyle()
-        lay = QHBoxLayout()
-        self.setLayout(lay)
-        lay.addWidget(self.stack)
-        lay.setSpacing(0)
+        spl = QSplitter()
+        _l = QHBoxLayout()
+        _l.addWidget(spl)
+        self.setLayout(_l)
+
+        spl.addWidget(self.stack)
         self.righttop = makesubtab_lazy()
         self.pixview = pixwrapper()
         self.pixview.startgame.connect(
@@ -855,31 +851,17 @@ class dialog_savedgame_v3(QWidget):
         rightlay.setContentsMargins(0, 0, 0, 0)
         _w.setLayout(rightlay)
         self.righttop.addTab(_w, "画廊")
-        lay.addWidget(self.righttop)
-        rightlay.addWidget(self.pixview)
-        self.buttonlayout = QHBoxLayout()
-        self.savebutton = []
-        rightlay.addLayout(self.buttonlayout)
+        spl.addWidget(self.righttop)
 
-        self.simplebutton(
-            "开始游戏",
-            True,
-            lambda: startgamecheck(
-                self, getreflist(self.reftagid), self.currentfocusuid
-            ),
-            True,
-        )
-        self.simplebutton("删除游戏", True, self.shanchuyouxi, False)
-        self.simplebutton("打开目录", True, self.clicked4, True)
-        self.simplebutton("添加到列表", True, self.addtolist, False)
-        # if globalconfig["startgamenototop"]:
-        self.simplebutton("上移", True, functools.partial(self.moverank, -1), False)
-        self.simplebutton("下移", True, functools.partial(self.moverank, 1), False)
-        self.simplebutton("添加游戏", False, self.clicked3, 1)
-        self.simplebutton("批量添加", False, self.clicked3_batch, 1)
-        self.simplebutton(
-            "其他设置", False, lambda: dialog_syssetting(self, type_=2), False
-        )
+        def __(_):
+            globalconfig["dialog_savegame_layout"]["listitemwidth_2"] = spl.sizes()
+
+        spl.setSizes(globalconfig["dialog_savegame_layout"]["listitemwidth_2"])
+        spl.splitterMoved.connect(__)
+        spl.setStretchFactor(0, 0)
+        spl.setStretchFactor(1, 1)
+        rightlay.addWidget(self.pixview)
+
         isfirst = True
         for i, tag in enumerate(savegametaged):
             # None
@@ -913,7 +895,6 @@ class dialog_savedgame_v3(QWidget):
                 group0.insertw(
                     rowreal,
                     functools.partial(self.delayitemcreater, k, vis, tagid, lst),
-                    1 + globalconfig["dialog_savegame_layout"]["listitemheight"],
                 )
 
                 rowreal += 1
@@ -959,48 +940,54 @@ class dialog_savedgame_v3(QWidget):
         elif action == Downaction:
             self.taglistrerank(tagid, 1)
         elif action == editname or action == addlist:
-            _dia = Prompt_dialog(
-                self,
-                "修改列表名称" if action == editname else "创建列表",
-                "",
-                [
-                    [
-                        "名称",
-                        (
-                            savegametaged[calculatetagidx(tagid)]["title"]
-                            if action == editname
-                            else ""
-                        ),
-                    ],
-                ],
-            )
-
-            if _dia.exec():
-
-                title = _dia.text[0].text()
-                if title != "":
-                    i = calculatetagidx(tagid)
-                    if action == addlist:
-                        tag = {
-                            "title": title,
-                            "games": [],
-                            "uid": str(uuid.uuid4()),
-                            "opened": True,
-                        }
-                        savegametaged.insert(i, tag)
-                        group0, btn = self.createtaglist(
-                            self.stack, title, tag["uid"], True
-                        )
-                        self.stack.insertw(i, group0)
-                    elif action == editname:
-                        self.stack.w(i).settitle(title)
-                        savegametaged[i]["title"] = title
+            self.createlist(action == addlist, tagid)
 
         elif action == dellist:
             i = calculatetagidx(tagid)
             savegametaged.pop(i)
             self.stack.popw(i)
             self.reallist.pop(tagid)
+
+    def createlist(self, create, tagid):
+        __d = {"k": ("" if create else savegametaged[calculatetagidx(tagid)]["title"])}
+
+        def cb(__d):
+            title = __d["k"]
+            if not title:
+                return
+            i = calculatetagidx(tagid)
+            if create:
+                tag = {
+                    "title": title,
+                    "games": [],
+                    "uid": str(uuid.uuid4()),
+                    "opened": True,
+                }
+                savegametaged.insert(i, tag)
+                group0, btn = self.createtaglist(self.stack, title, tag["uid"], True)
+                self.stack.insertw(i, group0)
+            else:
+                self.stack.w(i).settitle(title)
+                savegametaged[i]["title"] = title
+
+        autoinitdialog(
+            self,
+            __d,
+            "创建列表" if create else "修改列表名称",
+            600,
+            [
+                {
+                    "type": "lineedit",
+                    "name": "名称",
+                    "k": "k",
+                },
+                {
+                    "type": "okcancel",
+                    "callback": functools.partial(cb, __d),
+                },
+            ],
+            exec_=True,
+        )
 
     def createtaglist(self, p, title, tagid, opened):
 
@@ -1032,6 +1019,12 @@ class dialog_savedgame_v3(QWidget):
         )
 
         self.stack.w(calculatetagidx(self.reftagid)).switchidx(idx1, idx2)
+        try:
+            self.stack.ensureWidgetVisible(
+                self.stack.w(calculatetagidx(self.reftagid)).w(idx2)
+            )
+        except:
+            pass
         idx1 = getreflist(self.reftagid).index(uid)
         idx2 = getreflist(self.reftagid).index(uid2)
         getreflist(self.reftagid).insert(idx2, getreflist(self.reftagid).pop(idx1))
@@ -1082,16 +1075,6 @@ class dialog_savedgame_v3(QWidget):
 
     def clicked(self):
         startgamecheck(self, getreflist(self.reftagid), self.currentfocusuid)
-
-    def simplebutton(self, text, save, callback, exists):
-        button5 = LPushButton(text)
-        button5.setMinimumWidth(10)
-        if save:
-            self.savebutton.append((button5, exists))
-        button5.clicked.connect(callback)
-        button5.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.buttonlayout.addWidget(button5)
-        return button5
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():

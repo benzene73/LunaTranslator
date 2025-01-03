@@ -2,7 +2,7 @@ import windows
 import os, time
 import codecs, hashlib, shutil
 import socket, gobject, uuid, subprocess, functools
-import importlib, json
+import importlib, json, requests
 from qtsymbols import *
 from string import Formatter
 from ctypes import cast, c_char, POINTER
@@ -21,6 +21,7 @@ import threading, winreg
 import re, heapq, winsharedutils
 from myutils.wrapper import tryprint, threader
 from html.parser import HTMLParser
+from myutils.audioplayer import bass_code_cast
 
 
 def qimage2binary(qimage: QImage, fmt="BMP"):
@@ -90,7 +91,7 @@ def getlangtgt():
 def getlanguagespace(lang=None):
     if lang is None:
         lang = getlanguse()
-    return "" if (lang in ("zh", "ja", "cht")) else " "
+    return "" if (lang.split("-")[0] in ("zh", "ja", "cht")) else " "
 
 
 def findenclose(text, tag):
@@ -113,8 +114,18 @@ def findenclose(text, tag):
             text = text[len(tage) :]
             collect += tage
         else:
-            collect += text[0]
-            text = text[1:]
+            _1 = text.find(tags)
+            _2 = text.find(tage)
+            if _1 != -1 and _2 != -1:
+                m = min(_1, _2)
+            elif _1 != -1:
+                m = _1
+            elif _2 != -1:
+                m = _2
+            else:
+                break
+            collect += text[:m]
+            text = text[m:]
         if i == 0:
             break
 
@@ -340,7 +351,15 @@ def kanjitrans(k):
     return k.translate(kanjichs2ja)
 
 
-def stringfyerror(e):
+def stringfyerror(e: Exception):
+    if e.args and isinstance(e.args[0], requests.Response):
+        from myutils.commonbase import maybejson
+
+        return "{} {}: {}".format(
+            e.args[0].status_code,
+            e.args[0].reason,
+            str(maybejson(e.args[0])).replace("\n", " ").replace("\r", ""),
+        )
     return str(type(e))[8:-2] + " " + str(e).replace("\n", " ").replace("\r", "")
 
 
@@ -356,7 +375,7 @@ def checkportavailable(port):
 
 
 def splittranslatortypes():
-    pre, offline, free, dev, api = [], [], [], [], []
+    pre, offline, free, api = [], [], [], []
     for k in globalconfig["fanyi"]:
         try:
             {"pre": pre, "offline": offline, "free": free, "api": api}[
@@ -365,7 +384,7 @@ def splittranslatortypes():
         except:
             pass
 
-    return offline, pre, free, dev, api
+    return offline, pre, free, api
 
 
 def splitocrtypes(dic):
@@ -699,15 +718,6 @@ def parsekeystringtomodvkcode(keystring, modes=False):
     return mode, vkcode
 
 
-def str2rgba(string, alpha100):
-    return "rgba(%s, %s, %s, %s)" % (
-        int(string[1:3], 16),
-        int(string[3:5], 16),
-        int(string[5:7], 16),
-        alpha100 / 100,
-    )
-
-
 def get_time_stamp(ct=None, ms=True):
     if ct is None:
         ct = time.time()
@@ -840,17 +850,11 @@ class loopbackrecorder:
         wav = self.capture.stop()
         if not wav:
             return callback("")
-        mp3 = winsharedutils.encodemp3(wav)
-        if not mp3:
-            file = gobject.gettempdir(str(time.time()) + ".wav")
-            with open(file, "wb") as ff:
-                ff.write(wav)
-            callback(file)
-        else:
-            file = gobject.gettempdir(str(time.time()) + ".mp3")
-            with open(file, "wb") as ff:
-                ff.write(mp3)
-            callback(file)
+        new, ext = bass_code_cast(wav, "wav")
+        file = gobject.gettempdir(str(time.time()) + "." + ext)
+        with open(file, "wb") as ff:
+            ff.write(new)
+        callback(file)
 
 
 def copytree(src, dst, copy_function=shutil.copy2):

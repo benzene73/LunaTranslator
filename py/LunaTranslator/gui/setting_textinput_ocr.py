@@ -2,7 +2,7 @@ from qtsymbols import *
 import functools, os
 from myutils.config import globalconfig, ocrsetting, ocrerrorfix, static_data
 from myutils.utils import splitocrtypes, dynamiclink, getimagefilefilter
-from gui.inputdialog import autoinitdialogx, postconfigdialog, autoinitdialog_items
+from gui.inputdialog import postconfigdialog, autoinitdialog_items, autoinitdialog
 from gui.usefulwidget import (
     D_getsimplecombobox,
     D_getspinbox,
@@ -28,6 +28,7 @@ import gobject, qtawesome
 from gui.dynalang import LFormLayout, LDialog, LAction
 from myutils.ocrutil import ocr_end, ocr_init, ocr_run
 from myutils.wrapper import threader, Singleton_close
+from gui.setting_about import offlinelinks
 
 
 def __label1(self):
@@ -141,7 +142,7 @@ def initgridsources(self, names):
             items = autoinitdialog_items(ocrsetting[name])
             _3 = D_getIconButton(
                 callback=functools.partial(
-                    autoinitdialogx,
+                    autoinitdialog,
                     self,
                     ocrsetting[name]["args"],
                     globalconfig["ocr"][name]["name"],
@@ -385,14 +386,17 @@ class showocrimage(saveposwindow):
 
 def internal(self):
     offline, online = splitocrtypes(globalconfig["ocr"])
-
+    offgrids = initgridsources(self, offline)
+    offgrids += [
+        [(functools.partial(offlinelinks, "ocr"), 0)],
+    ]
     engines = [
         [
             (
                 dict(
                     title="离线",
                     type="grid",
-                    grid=initgridsources(self, offline),
+                    grid=offgrids,
                 ),
                 0,
                 "group",
@@ -503,10 +507,6 @@ def internal(self):
         [
             "选取OCR范围后显示范围框",
             D_getsimpleswitch(globalconfig, "showrangeafterrangeselect"),
-        ],
-        [
-            "选取OCR范围后自动绑定窗口",
-            D_getsimpleswitch(globalconfig, "ocrautobindhwnd"),
         ],
         [
             "选取OCR范围时不透明度",

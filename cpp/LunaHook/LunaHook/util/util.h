@@ -55,12 +55,8 @@ uintptr_t SafeFindEnclosingAlignedFunction(uintptr_t addr, uintptr_t range);
 uintptr_t SafeFindBytes(LPCVOID pattern, size_t patternSize, uintptr_t lowerBound, uintptr_t upperBound);
 #ifndef _WIN64
 
-ULONG _SafeMatchBytesInMappedMemory(LPCVOID pattern, DWORD patternSize, BYTE wildcard,
-                                    ULONG start, ULONG stop, ULONG step);
-ULONG SafeMatchBytesInGCMemory(LPCVOID pattern, DWORD patternSize);
 
 std::vector<DWORD> findrelativecall(const BYTE *pattern, int length, DWORD calladdress, DWORD start, DWORD end);
-uintptr_t finddllfunctioncall(uintptr_t funcptr, uintptr_t start, uintptr_t end, WORD sig = 0x15ff, bool reverse = false);
 uintptr_t findfuncstart(uintptr_t addr, uintptr_t range = 0x100, bool checkalign = false);
 uintptr_t findiatcallormov(uintptr_t addr, DWORD hmodule, uintptr_t start, uintptr_t end, bool reverse = false, BYTE movreg = 0);
 std::vector<uintptr_t> findiatcallormov_all(uintptr_t addr, DWORD hmodule, uintptr_t start, uintptr_t end, DWORD protect, BYTE movreg = 0);
@@ -105,7 +101,6 @@ auto allocateString(const StringT &s) -> typename StringT::value_type *
 {
   size_t t = s.size();
   typename StringT::value_type *_data = new typename StringT::value_type[t + 1];
-  strcpyEx(_data, s.data());
   memcpy(_data, s.data(), strSize(s));
   _data[t] = 0;
   return _data;

@@ -1,7 +1,8 @@
 from qtsymbols import *
 import functools, importlib
 from traceback import print_exc
-import qtawesome, os, gobject, json
+import qtawesome, os, gobject, requests
+from myutils.commonbase import maybejson
 from myutils.config import globalconfig, _TR
 from myutils.utils import makehtml
 from myutils.wrapper import Singleton_close
@@ -445,26 +446,21 @@ def autoinitdialog_items(dic):
 
 
 @Singleton_close
-class autoinitdialog__(LDialog):
+class autoinitdialog(LDialog):
     def __init__(
-        self, parent, dd, title, width, lines, modelfile=None, maybehasextrainfo=None
+        self,
+        parent,
+        dd,
+        title,
+        width,
+        lines,
+        modelfile=None,
+        maybehasextrainfo=None,
+        exec_=False,
     ) -> None:
         super().__init__(parent, Qt.WindowType.WindowCloseButtonHint)
         self.setWindowTitle(title)
         self.resize(QSize(width, 10))
-        for line in lines:
-            if line["type"] != "program":
-                continue
-            try:
-                func = getattr(
-                    importlib.import_module(line["route"][0]),
-                    line["route"][1],
-                )
-                func(self)
-            except:
-                print_exc()
-            self.show()
-            return
         formLayout = VisLFormLayout()
         self.setLayout(formLayout)
         regist = {}
@@ -553,8 +549,21 @@ class autoinitdialog__(LDialog):
                 else:
                     items = line["list"]
                 lineW.addItems(items)
-                lineW.setCurrentIndex(dd.get(key, 0))
-                regist[key] = lineW.currentIndex
+
+                if "internal" in line:
+                    lineW.setCurrentIndex(
+                        line["internal"].index(dd.get(key))
+                        if dd.get(key) in line["internal"]
+                        else 0
+                    )
+
+                    def __(lineW, line):
+                        return line["internal"][lineW.currentIndex()]
+
+                    regist[key] = functools.partial(__, lineW, line)
+                else:
+                    lineW.setCurrentIndex(dd.get(key, 0))
+                    regist[key] = lineW.currentIndex
                 cachecombo[key] = lineW
             elif line["type"] == "lineedit_or_combo":
                 line1 = QLineEdit()
@@ -577,7 +586,18 @@ class autoinitdialog__(LDialog):
                         dd[refname2line[line["list_cache"]]["k"]] = items
                     except Exception as e:
                         print_exc()
-                        QMessageBox.information(self, str(type(e))[8:-2], str(e))
+                        if e.args and isinstance(e.args[0], requests.Response):
+                            QMessageBox.information(
+                                self,
+                                "{} {}: {}".format(
+                                    e.args[0].status_code,
+                                    e.args[0].reason,
+                                    e.args[0].url,
+                                ),
+                                str(maybejson(e.args[0])),
+                            )
+                        else:
+                            QMessageBox.information(self, str(type(e))[8:-2], str(e))
 
                 if "list_function" in line:
                     items = dd[refname2line[line["list_cache"]]["k"]]
@@ -597,9 +617,6 @@ class autoinitdialog__(LDialog):
                         )
                     )
                 lineW.addWidget(combo)
-                _w = QWidget()
-                _w.setLayout(lineW)
-                lineW = _w
             elif line["type"] == "okcancel":
                 lineW = QDialogButtonBox(
                     QDialogButtonBox.StandardButton.Ok
@@ -635,9 +652,6 @@ class autoinitdialog__(LDialog):
                 )
 
                 regist[key] = functools.partial(__temp.__getitem__, "k")
-                _ = QWidget()
-                _.setLayout(lineW)
-                lineW = _
             elif line["type"] == "switch":
                 lineW = MySwitch(sign=dd[key])
                 regist[key] = lineW.isChecked
@@ -645,9 +659,7 @@ class autoinitdialog__(LDialog):
                 _.addStretch()
                 _.addWidget(lineW)
                 _.addStretch()
-                _w = QWidget()
-                _w.setLayout(_)
-                lineW = _w
+                lineW = _
             elif line["type"] in ["spin", "intspin"]:
 
                 __temp = {"k": dd[key]}
@@ -676,9 +688,9 @@ class autoinitdialog__(LDialog):
                     lineW.setEnabled(dd[key])
                     hbox.addWidget(switch)
                     hbox.addWidget(lineW)
-                    _ = QWidget()
-                    _.setLayout(hbox)
-                    lineW = _
+                    lineW = hbox
+            if isinstance(lineW, QLayout):
+                lineW.setContentsMargins(0, 0, 0, 0)
             if ("name" not in line) or (line["type"] == "split"):
                 formLayout.addRow(lineW)
             else:
@@ -692,6 +704,7 @@ class autoinitdialog__(LDialog):
         for comboname, refitems in cachehasref.items():
 
             def refcombofunction(refitems, _i):
+                viss = []
                 for w, linwinfo in refitems:
                     vis = True
                     if linwinfo.get("refcombo_i") is not None:
@@ -700,7 +713,12 @@ class autoinitdialog__(LDialog):
                         vis = linwinfo.get("refcombo_i_r") != _i
                     elif linwinfo.get("refcombo_l") is not None:
                         vis = _i in linwinfo.get("refcombo_l")
-                    formLayout.setRowVisible(w, vis)
+                    if not vis:
+                        formLayout.setRowVisible(w, False)
+                    else:
+                        viss.append(w)
+                for w in viss:
+                    formLayout.setRowVisible(w, True)
 
             cachecombo[comboname].currentIndexChanged.connect(
                 functools.partial(refcombofunction, refitems)
@@ -708,18 +726,10 @@ class autoinitdialog__(LDialog):
             cachecombo[comboname].currentIndexChanged.emit(
                 cachecombo[comboname].currentIndex()
             )
-
-        self.show()
-
-
-def autoinitdialogx(
-    parent, dd, title, width, lines, modelfile, maybehasextrainfo, _=None
-):
-    autoinitdialog__(parent, dd, title, width, lines, modelfile, maybehasextrainfo)
-
-
-def autoinitdialog(parent, dd, title, width, lines, _=None):
-    autoinitdialog__(parent, dd, title, width, lines)
+        if exec_:
+            self.exec_()
+        else:
+            self.show()
 
 
 def getsomepath1(

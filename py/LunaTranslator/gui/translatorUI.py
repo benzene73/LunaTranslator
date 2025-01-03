@@ -15,7 +15,6 @@ from myutils.subproc import endsubprocs
 from myutils.ocrutil import ocr_run, imageCut
 from myutils.utils import (
     loadpostsettingwindowmethod,
-    str2rgba,
     makehtml,
     loadpostsettingwindowmethod_maybe,
     find_or_create_uid,
@@ -49,7 +48,7 @@ class ButtonX(QWidget):
         super().__init__(*argc)
         self.reflayout = None
         self.setMouseTracking(True)
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
     def showinlayout(self, layout):
 
@@ -86,6 +85,12 @@ class IconLabelX(LIconLabel, ButtonX):
             elif ev.button() == Qt.MouseButton.LeftButton:
                 self.clicked.emit()
         return super().mouseReleaseEvent(ev)
+
+
+def str2rgba(string, alpha100):
+    c = QColor(string)
+    c.setAlphaF(alpha100 / 100)
+    return c.name(QColor.NameFormat.HexArgb)
 
 
 class ButtonBar(QFrame):
@@ -561,7 +566,7 @@ class TranslatorWindow(resizableframeless):
             ("setting", lambda: gobject.baseobject.settin_ui.showsignal.emit()),
             (
                 "copy",
-                lambda: winsharedutils.clipboard_set(gobject.baseobject.currenttext),
+                lambda: gobject.baseobject.clipboardhelper.setText.emit(gobject.baseobject.currenttext),
             ),
             ("edit", gobject.baseobject.createedittextui),
             ("edittrans", lambda: edittrans(gobject.baseobject.commonstylebase)),
@@ -695,7 +700,7 @@ class TranslatorWindow(resizableframeless):
             (
                 "copy_once",
                 lambda: gobject.baseobject.textgetmethod(
-                    winsharedutils.clipboard_get(), False
+                    QApplication.clipboard().text("plain")[0], False
                 ),
             ),
             (

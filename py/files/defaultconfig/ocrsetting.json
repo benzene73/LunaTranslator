@@ -1,18 +1,4 @@
 {
-    "local": {
-        "args": {
-            "": ""
-        },
-        "argstype": {
-            "": {
-                "type": "program",
-                "route": [
-                    "ocrengines.local",
-                    "question"
-                ]
-            }
-        }
-    },
     "youdaodictocr": {
         "args": {
             "Translate": false
@@ -21,20 +7,6 @@
             "Translate": {
                 "type": "switch",
                 "name": "翻译"
-            }
-        }
-    },
-    "windowsocr": {
-        "args": {
-            "": ""
-        },
-        "argstype": {
-            "": {
-                "type": "program",
-                "route": [
-                    "ocrengines.windowsocr",
-                    "question"
-                ]
             }
         }
     },
@@ -214,10 +186,10 @@
             "custom_prompt": ""
         },
         "argstype": {
-			"BASE_URL": {
-				"name": "API接口地址",
-				"rank": 0
-			},
+            "BASE_URL": {
+                "name": "API接口地址",
+                "rank": 0
+            },
             "key": {
                 "rank": 2,
                 "name": "API Key"
@@ -317,7 +289,23 @@
         "args": {
             "APPId": "",
             "APISecret": "",
-            "APIKey": ""
+            "APIKey": "",
+            "interface": "hh_ocr_recognize_doc"
+        },
+        "argstype": {
+            "interface": {
+                "rank": 0,
+                "name": "接口",
+                "type": "combo",
+                "list": [
+                    "通用文字识别 intsig",
+                    "印刷文字识别（多语种）"
+                ],
+                "internal": [
+                    "hh_ocr_recognize_doc",
+                    "ocr"
+                ]
+            }
         }
     },
     "mangaocr": {

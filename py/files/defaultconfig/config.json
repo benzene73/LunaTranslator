@@ -1,11 +1,11 @@
 {
+    "autoopenselecttext": true,
     "lastapppath": null,
     "ocrafterrangeselect": true,
     "excule_from_self": true,
     "excule_from_exe": [],
     "only_from_exe": [],
     "showrangeafterrangeselect": true,
-    "ocrautobindhwnd": false,
     "autodisappear": false,
     "WindowBackdrop": 3,
     "WindowEffect": 0,
@@ -280,11 +280,7 @@
             "downloadtasks": [],
             "searchfordatatasks": [],
             "useproxy": true,
-            "target": "steamid",
-            "args": {
-                "userid": "",
-                "steamLoginSecure": ""
-            }
+            "target": "steamid"
         }
     },
     "relationlinks": [
@@ -315,7 +311,7 @@
         "use_appointed_translate": false,
         "timeout_translate": 2,
         "trans_kanji": false,
-        "keeprawtext": false,
+        "displaymode": 0,
         "insertspace_policy": 0,
         "changefont": false,
         "changefont_font": "",
@@ -444,7 +440,6 @@
     "localeswitchmethod": 0,
     "hide_not_exists": false,
     "startgamenototop": true,
-    "showgametitle": true,
     "extra_space": 0,
     "extra_space_trans": 0,
     "fonttype": "",
@@ -462,7 +457,6 @@
     "isshowhira": true,
     "locktools": true,
     "showfanyisource": false,
-    "use_yapi": false,
     "showfanyi": true,
     "autoread": false,
     "ttsnointerrupt": false,
@@ -488,6 +482,9 @@
         "tags": []
     },
     "imageformat": -1,
+    "mp3kbps": 64,
+    "opusbitrate": 10,
+    "audioformat": "mp3",
     "ankiwindow": [
         100,
         100,
@@ -520,19 +517,21 @@
     "useproxy": true,
     "usesysproxy": true,
     "fullscreenmethod_4": 0,
+    "tagNameRemap": {},
     "dialog_savegame_layout": {
-        "itemw": 250,
-        "itemh": 350,
-        "margin": 10,
-        "textH": 50,
-        "backcolor1": "#ffffff",
-        "onselectcolor1": "#007fff",
-        "onfilenoexistscolor1": "#acacac",
-        "transparent": 25,
-        "transparentselect": 25,
-        "transparentnotexits": 25,
-        "listitemheight": 40,
-        "listitemwidth": 300
+        "itemw": 130,
+        "itemh": 190,
+        "margin": 6,
+        "margin2": 6,
+        "textH": 0,
+        "backcolor2": "#40ffffff",
+        "onselectcolor2": "#40007fff",
+        "onfilenoexistscolor2": "#40acacac",
+        "listitemheight": 30,
+        "listitemwidth_2": [
+            300,
+            500
+        ]
     },
     "gamemanageruseversion": 0,
     "gamemanager_integrated_internal_layout": 0,
@@ -898,7 +897,7 @@
         "空白": false
     },
     "quick_setting": {
-        "use": false,
+        "use": true,
         "all": {
             "36": {
                 "use": false,
@@ -1050,6 +1049,21 @@
                 "name": "复制到剪贴板_翻译",
                 "keystring": ""
             },
+            "37": {
+                "use": false,
+                "name": "取词查词",
+                "keystring": ""
+            },
+            "38": {
+                "use": false,
+                "name": "取词翻译",
+                "keystring": ""
+            },
+            "39": {
+                "use": false,
+                "name": "OCR_查词",
+                "keystring": ""
+            },
             "_29": {
                 "use": false,
                 "name": "Anki_录音",
@@ -1178,19 +1192,13 @@
             "use": true,
             "name": "MeCab",
             "args": {
-                "path": "",
-                "downloadlink": "{main_server}/Resource/dictionary/Mecab.zip"
+                "path": ""
             },
             "argstype": {
                 "path": {
                     "type": "file",
-                    "name": "路径",
+                    "name": "unidic_路径",
                     "dir": true
-                },
-                "downloadlink": {
-                    "type": "label",
-                    "islink": true,
-                    "name": "下载"
                 }
             },
             "type": "offline"
@@ -1242,156 +1250,30 @@
         }
     },
     "cishu": {
-        "xiaoxueguan": {
-            "args": {
-                "path": "",
-                "distance": 0,
-                "max_num": 10
-            },
-            "argstype": {
-                "path": {
-                    "type": "file",
-                    "name": "路径",
-                    "dir": false,
-                    "filter": "*.db"
-                },
-                "distance": {
-                    "type": "intspin",
-                    "name": "模糊匹配_编辑距离",
-                    "min": 0,
-                    "max": 100,
-                    "step": 1
-                },
-                "max_num": {
-                    "type": "intspin",
-                    "name": "最大结果条数",
-                    "min": 0,
-                    "max": 9999,
-                    "step": 1
-                }
-            },
-            "use": false,
-            "name": "小学馆",
-            "type": "offline"
-        },
-        "edict": {
-            "use": false,
-            "name": "EDICT",
-            "args": {
-                "path": "",
-                "distance": 0,
-                "max_num": 10
-            },
-            "argstype": {
-                "path": {
-                    "type": "file",
-                    "name": "路径",
-                    "dir": false,
-                    "filter": "*.db"
-                },
-                "distance": {
-                    "type": "intspin",
-                    "name": "模糊匹配_编辑距离",
-                    "min": 0,
-                    "max": 100,
-                    "step": 1
-                },
-                "max_num": {
-                    "type": "intspin",
-                    "name": "最大结果条数",
-                    "min": 0,
-                    "max": 9999,
-                    "step": 1
-                }
-            },
-            "type": "offline"
-        },
-        "edict2": {
-            "use": false,
-            "name": "EDICT2",
-            "args": {
-                "path": "",
-                "distance": 0,
-                "max_num": 10
-            },
-            "argstype": {
-                "path": {
-                    "type": "file",
-                    "name": "路径",
-                    "dir": false
-                },
-                "distance": {
-                    "type": "intspin",
-                    "name": "模糊匹配_编辑距离",
-                    "min": 0,
-                    "max": 100,
-                    "step": 1
-                },
-                "max_num": {
-                    "type": "intspin",
-                    "name": "最大结果条数",
-                    "min": 0,
-                    "max": 9999,
-                    "step": 1
-                }
-            },
-            "type": "offline"
-        },
-        "linggesi": {
-            "use": false,
-            "name": "灵格斯词典",
-            "args": {
-                "path": "",
-                "distance": 0,
-                "max_num": 10
-            },
-            "argstype": {
-                "path": {
-                    "type": "file",
-                    "name": "路径",
-                    "dir": true
-                },
-                "distance": {
-                    "type": "intspin",
-                    "name": "模糊匹配_编辑距离",
-                    "min": 0,
-                    "max": 100,
-                    "step": 1
-                },
-                "max_num": {
-                    "type": "intspin",
-                    "name": "最大结果条数",
-                    "min": 0,
-                    "max": 9999,
-                    "step": 1
-                }
-            },
-            "type": "offline"
-        },
         "mojidict": {
-            "use": false,
+            "use": true,
             "name": "Moji辞书",
             "useproxy": false
         },
         "youdao": {
-            "use": false,
+            "use": true,
             "name": "有道词典",
             "useproxy": false
         },
         "jisho": {
-            "use": false,
+            "use": true,
             "name": "jisho"
         },
         "japandict": {
-            "use": false,
+            "use": true,
             "name": "JapanDict"
         },
         "weblio": {
-            "use": false,
+            "use": true,
             "name": "weblio"
         },
         "goo": {
-            "use": false,
+            "use": true,
             "name": "goo"
         },
         "gemini": {
@@ -1565,7 +1447,7 @@
                 "max_num": {
                     "type": "intspin",
                     "name": "最大结果条数",
-                    "min": 0,
+                    "min": 1,
                     "max": 9999,
                     "step": 1
                 },
@@ -1793,7 +1675,7 @@
             "type": "offline",
             "use": false,
             "color": "#1839f0",
-            "name": "Jbeijing7"
+            "name": "J北京7"
         },
         "eztrans": {
             "type": "offline",
@@ -1824,6 +1706,12 @@
             "use": false,
             "color": "#1839f0",
             "name": "Atlas"
+        },
+        "lec": {
+            "type": "offline",
+            "use": false,
+            "color": "#1839f0",
+            "name": "LEC"
         },
         "sougou2": {
             "use": false,

@@ -1,9 +1,9 @@
 from qtsymbols import *
-import os, platform, functools, uuid, json, math, csv, io, pickle
+import os, re, functools, uuid, json, math, csv, io, pickle
 from traceback import print_exc
 import windows, qtawesome, winsharedutils, gobject
 from webviewpy import webview_native_handle_kind_t, Webview
-from myutils.config import _TR, globalconfig, _TRL
+from myutils.config import _TR, globalconfig
 from myutils.wrapper import Singleton_close, tryprint
 from myutils.utils import nowisdark, checkportavailable, checkisusingwine
 from gui.dynalang import (
@@ -17,6 +17,7 @@ from gui.dynalang import (
     LStandardItemModel,
     LDialog,
     LMainWindow,
+    LToolButton,
 )
 
 
@@ -88,32 +89,31 @@ class FocusFontCombo(QFontComboBox, FocusCombo):
     pass
 
 
-class FocusSpin(QSpinBox):
+class FocusSpinBase(QAbstractSpinBox):
+
     def __init__(self, parent: QWidget = None) -> None:
         super().__init__(parent)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def wheelEvent(self, e: QWheelEvent) -> None:
-
         if not self.hasFocus():
             e.ignore()
             return
         else:
             return super().wheelEvent(e)
 
+    def stepBy(self, steps):
+        _ = super().stepBy(steps)
+        self.stepbysignal.emit(steps)
+        return _
 
-class FocusDoubleSpin(QDoubleSpinBox):
-    def __init__(self, parent: QWidget = None) -> None:
-        super().__init__(parent)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-    def wheelEvent(self, e: QWheelEvent) -> None:
+class FocusSpin(QSpinBox, FocusSpinBase):
+    stepbysignal = pyqtSignal(int)
 
-        if not self.hasFocus():
-            e.ignore()
-            return
-        else:
-            return super().wheelEvent(e)
+
+class FocusDoubleSpin(QDoubleSpinBox, FocusSpinBase):
+    stepbysignal = pyqtSignal(int)
 
 
 class TableViewW(QTableView):
@@ -318,13 +318,13 @@ class TableViewW(QTableView):
             csv_writer.writerow(row)
         csv_str = output.getvalue()
         output.close()
-        winsharedutils.clipboard_set(csv_str)
+        gobject.baseobject.clipboardhelper.setText.emit(csv_str)
 
     def pastetable(self):
         current = self.currentIndex()
         if not current.isValid():
             return
-        string = winsharedutils.clipboard_get()
+        string = QApplication.clipboard().text("plain")[0]
         try:
             csv_file = io.StringIO(string)
             csv_reader = csv.reader(csv_file, delimiter="\t")
@@ -642,56 +642,6 @@ class MySwitch(commonsolveevent):
         pass
 
 
-class IconButton(commonsolveevent):
-    clicked = pyqtSignal()
-
-    def sizeHint(self):
-        return QSize(
-            int(1.42 * globalconfig["buttonsize2"]),
-            int(1.42 * globalconfig["buttonsize2"]),
-        )
-
-    def __init__(self, icon, enable=True, qicon=None, parent=None):
-        super().__init__(parent)
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.enable = enable
-        self._icon = icon
-        self._qicon = qicon
-
-    def setEnabled(self, enable):
-        self.enable = enable
-        self.update()
-
-    def isEnabled(self):
-        return self.enable
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        if self._qicon:
-            icon = self._qicon
-
-        else:
-
-            __ = QColor(globalconfig["buttoncolor2"])
-            if not self.enable:
-                __ = disablecolor(__)
-            icon: QIcon = qtawesome.icon(self._icon, color=__)
-        bigw = self.size().width() - self.sizeHint().width()
-        bigh = self.size().height() - self.sizeHint().height()
-        x = bigw // 2
-        y = bigh // 2
-        painter.drawPixmap(x, y, icon.pixmap(self.sizeHint()))
-
-    def mouseReleaseEvent(self, event) -> None:
-        if not self.enable:
-            return
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
-
-
 class resizableframeless(saveposwindow):
     def __init__(self, parent, flags, poslist) -> None:
         super().__init__(parent, poslist, flags)
@@ -855,42 +805,6 @@ class resizableframeless(saveposwindow):
         return x, y, width, height
 
 
-class Prompt_dialog(LDialog):
-    def __init__(self, parent, title, info, items) -> None:
-        super().__init__(parent)
-        self.setWindowFlags(
-            self.windowFlags()
-            & ~Qt.WindowType.WindowContextHelpButtonHint
-            & ~Qt.WindowType.WindowCloseButtonHint
-            | Qt.WindowType.WindowStaysOnTopHint
-        )
-        self.setWindowTitle(title)
-        self.setWindowIcon(qtawesome.icon("fa-question"))
-
-        _layout = QVBoxLayout()
-
-        _layout.addWidget(LLabel(info))
-
-        self.text = []
-        for _ in items:
-
-            le = QLineEdit()
-            le.setText(_[1])
-            self.text.append((le))
-            hl = QHBoxLayout()
-            hl.addWidget(LLabel(_[0]))
-            hl.addWidget(le)
-            _layout.addLayout(hl)
-        button = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        button.accepted.connect(self.accept)
-        button.rejected.connect(self.reject)
-        _layout.addWidget(button)
-        self.setLayout(_layout)
-        self.resize(400, 1)
-
-
 def callbackwrap(d, k, call, _):
     d[k] = _
 
@@ -913,8 +827,19 @@ def comboboxcallbackwrap(s: SuperCombo, d, k, call, _):
 
 
 def getsimplecombobox(
-    lst, d, k, callback=None, fixedsize=False, internal=None, static=False, emit=False
+    lst,
+    d=None,
+    k=None,
+    callback=None,
+    fixedsize=False,
+    internal=None,
+    static=False,
+    initial=None,
 ):
+    if d is None:
+        d = {}
+    if initial is not None:
+        d[k] = initial
     s = SuperCombo(static=static)
     s.addItems(lst, internal)
 
@@ -995,29 +920,17 @@ def getcolorbutton(
     icon="fa.paint-brush",
     constcolor=None,
     enable=True,
-    transparent=True,
     qicon=None,
     sizefixed=False,
 ):
     if qicon is None:
         qicon = qtawesome.icon(icon, color=constcolor if constcolor else d[key])
-    b = QPushButton()
-    b.setIcon(qicon)
-    b.setEnabled(enable)
+    b = IconButton(None, enable=enable, parent=parent, qicon=qicon)
     sz = int(1.42 * globalconfig["buttonsize2"])
-    b.setIconSize(QSize(sz, sz))
     if sizefixed:
         b.setFixedSize(QSize(sz, sz))
-    if transparent:
-        b.setStyleSheet(
-            """background-color: rgba(255, 255, 255, 0);
-            color: black;
-            border: 0px;
-            font: 100 10pt;"""
-        )
     if callback:
         b.clicked.connect(callback)
-    b.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
     if name:
         setattr(parent, name, b)
     return b
@@ -1032,7 +945,6 @@ def D_getcolorbutton(
     icon="fa.paint-brush",
     constcolor=None,
     enable=True,
-    transparent=True,
     qicon=None,
     sizefixed=False,
 ):
@@ -1045,7 +957,6 @@ def D_getcolorbutton(
         icon,
         constcolor,
         enable,
-        transparent,
         qicon,
         sizefixed,
     )
@@ -1098,18 +1009,51 @@ def D_getsimpleswitch(
     )
 
 
+def getColor(color, parent, alpha=False):
+
+    color_dialog = QColorDialog(color, parent)
+    if alpha:
+        color_dialog.setOption(QColorDialog.ColorDialogOption.ShowAlphaChannel, True)
+    layout = color_dialog.layout()
+    clearlayout(layout.itemAt(0).layout().takeAt(0))
+    layout = layout.itemAt(0).layout().itemAt(0).layout().itemAt(2).widget().layout()
+    layout.takeAt(1).widget().hide()
+    layout.takeAt(1).widget().hide()
+    layout.takeAt(1).widget().hide()
+    layout.takeAt(1).widget().hide()
+    layout.takeAt(1).widget().hide()
+    layout.takeAt(1).widget().hide()
+
+    layout.takeAt(layout.count() - 1).widget().hide()
+    layout.takeAt(layout.count() - 1).widget().hide()
+    if not alpha:
+        layout.takeAt(layout.count() - 1).widget().hide()
+        layout.takeAt(layout.count() - 1).widget().hide()
+    if color_dialog.exec_() != QColorDialog.DialogCode.Accepted:
+        return QColor()
+    return color_dialog.selectedColor()
+
+
 def selectcolor(
-    parent, configdict, configkey, button, item=None, name=None, callback=None
+    parent,
+    configdict,
+    configkey,
+    button,
+    item=None,
+    name=None,
+    callback=None,
+    alpha=False,
 ):
 
-    color = QColorDialog.getColor(QColor(configdict[configkey]), parent)
+    color = getColor(QColor(configdict[configkey]), parent, alpha)
     if not color.isValid():
         return
     if button is None:
         button = getattr(item, name)
     button.setIcon(qtawesome.icon("fa.paint-brush", color=color.name()))
-    configdict[configkey] = color.name()
-
+    configdict[configkey] = (
+        color.name(QColor.NameFormat.HexArgb) if alpha else color.name()
+    )
     if callback:
         try:
             callback()
@@ -1183,9 +1127,6 @@ class abstractwebview(QWidget):
 
     def set_transparent_background(self):
         pass
-
-    def clear(self):
-        self.navigate("about:blank")
 
     def _parsehtml_codec(self, html):
 
@@ -1456,7 +1397,22 @@ class QWebWrap(abstractwebview):
 
 
 class mshtmlWidget(abstractwebview):
-    CommandBase = 10086
+
+    def eval(self, js):
+        winsharedutils.html_eval(self.browser, js)
+
+    def bindhelper(self, func, ppwc, argc):
+        argv = []
+        for i in range(argc):
+            argv.append(ppwc[argc - 1 - i])
+        func(*argv)
+
+    def bind(self, fname, func):
+        __f = winsharedutils.html_bind_function_FT(
+            functools.partial(self.bindhelper, func)
+        )
+        self.bindfs.append(__f)
+        winsharedutils.html_bind_function(self.browser, fname, __f)
 
     def __del__(self):
         if not self.browser:
@@ -1465,7 +1421,8 @@ class mshtmlWidget(abstractwebview):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.callbacks = {}
+        self.callbacks = []
+        self.bindfs = []
         iswine = checkisusingwine()
         if iswine or (winsharedutils.html_version() < 10001):  # ie10之前，sethtml会乱码
             self.html_limit = 0
@@ -1473,32 +1430,28 @@ class mshtmlWidget(abstractwebview):
         self.curr_url = None
         t = QTimer(self)
         t.setInterval(100)
-        t.timeout.connect(self.__getcurrenturl)
+        t.timeout.connect(self.__getcurrent)
         t.timeout.emit()
         t.start()
-        self.add_menu(0, _TR("复制"), winsharedutils.clipboard_set)
+        self.add_menu(0, _TR("复制"), gobject.baseobject.clipboardhelper.setText.emit)
         self.add_menu(0, None, lambda: 1)
 
-        self.wndproc = windows.WNDPROCTYPE(
-            functools.partial(
-                self.extrahandle,
-                windows.GetWindowLongPtr(int(self.winId()), windows.GWLP_WNDPROC),
-            )
-        )
-        windows.SetWindowLongPtr(int(self.winId()), windows.GWLP_WNDPROC, self.wndproc)
+    def __getcurrent(self):
+        def __(_u):
+            if self.curr_url != _u:
+                self.curr_url = _u
+                self.on_load.emit(_u)
 
-    def extrahandle(self, orig, hwnd, msg, wp, lp):
-        if msg == windows.WM_COMMAND:
-            func = self.callbacks.get(wp)
-            if func:
-                func(winsharedutils.html_get_select_text(self.browser))
-        return windows.WNDPROCTYPE(orig)(hwnd, msg, wp, lp)
+        cb = winsharedutils.html_get_select_text_cb(__)
+        winsharedutils.html_get_current_url(self.browser, cb)
 
-    def __getcurrenturl(self):
-        _u = winsharedutils.html_get_current_url(self.browser)
-        if self.curr_url != _u:
-            self.curr_url = _u
-            self.on_load.emit(_u)
+        if (
+            windows.GetAsyncKeyState(windows.VK_CONTROL)
+            and windows.GetAsyncKeyState(67)
+            and winsharedutils.html_get_ie(self.browser) == windows.GetFocus()
+        ):
+            cb = winsharedutils.html_get_select_text_cb(gobject.baseobject.clipboardhelper.setText.emit)
+            winsharedutils.html_get_select_text(self.browser, cb)
 
     def navigate(self, url):
         winsharedutils.html_navigate(self.browser, url)
@@ -1514,9 +1467,9 @@ class mshtmlWidget(abstractwebview):
         return self._parsehtml_codec(self._parsehtml_font(self._parsehtml_dark(html)))
 
     def add_menu(self, index, label, callback):
-        command = mshtmlWidget.CommandBase + len(self.callbacks)
-        self.callbacks[command] = callback
-        winsharedutils.html_add_menu(self.browser, index, command, label)
+        cb = winsharedutils.html_add_menu_cb(callback)
+        self.callbacks.append(cb)
+        winsharedutils.html_add_menu(self.browser, index, label, cb)
 
 
 class CustomKeySequenceEdit(QKeySequenceEdit):
@@ -1557,13 +1510,17 @@ class auto_select_webview(QWidget):
     on_load = pyqtSignal(str)
     on_ZoomFactorChanged = pyqtSignal(float)
 
+    def bind(self, funcname, function):
+        self.bindinfo.append((funcname, function))
+        self.internal.bind(funcname, function)
+
     def add_menu(self, index, label, callback):
         self.addmenuinfo.append((index, label, callback))
         self.internal.add_menu(index, label, callback)
 
     def clear(self):
         self.lastaction = None
-        self.internal.clear()
+        self.internal.setHtml(self.internal.parsehtml(""))  # 夜间
 
     def navigate(self, url):
         self.lastaction = 0, url
@@ -1592,6 +1549,7 @@ class auto_select_webview(QWidget):
     def __init__(self, parent, dyna=False) -> None:
         super().__init__(parent)
         self.addmenuinfo = []
+        self.bindinfo = []
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.internal = None
         layout = QHBoxLayout()
@@ -1626,8 +1584,12 @@ class auto_select_webview(QWidget):
                 self.navigate(arg)
             elif action == 1:
                 self.setHtml(arg)
+        else:
+            self.clear()
         for _ in self.addmenuinfo:
             self.internal.add_menu(*_)
+        for _ in self.bindinfo:
+            self.internal.bind(*_)
 
     def _createwebview(self):
         contex = globalconfig["usewebview"]
@@ -1640,6 +1602,43 @@ class auto_select_webview(QWidget):
             print_exc()
             browser = mshtmlWidget()
         return browser
+
+
+class threeswitch(QWidget):
+    btnclicked = pyqtSignal(int)
+
+    def selectlayout(self, i):
+        self.btns[(i + 0) % 3].setEnabled(False)
+        self.btns[(i + 1) % 3].setEnabled(False)
+        self.btns[(i + 2) % 3].setEnabled(False)
+        self.btns[(i + 0) % 3].setChecked(True)
+        self.btns[(i + 1) % 3].setChecked(False)
+        self.btns[(i + 2) % 3].setChecked(False)
+        self.btnclicked.emit(i)
+        self.btns[(i + 1) % 3].setEnabled(True)
+        self.btns[(i + 2) % 3].setEnabled(True)
+
+    def __init__(self, p, icons):
+        super().__init__(p)
+        self.btns = []
+        for i, icon in enumerate(icons):
+            btn = statusbutton(
+                p=self,
+                icons=icon,
+                border=False,
+                colors=["", globalconfig["buttoncolor2"]],
+            )
+            btn.clicked.connect(functools.partial(self.selectlayout, i))
+            btn.setFixedSize(QSize(20, 25))
+            self.btns.append(btn)
+        self.setFixedSize(QSize(60, 75))
+
+    def resizeEvent(self, a0):
+        x, y = 0, 0
+        for btn in self.btns:
+            btn.move(x, y)
+            x += btn.width()
+        return super().resizeEvent(a0)
 
 
 class threebuttons(QWidget):
@@ -1751,9 +1750,7 @@ def makegroupingrid(args):
     if title:
         group.setTitle(title)
     else:
-        group.setStyleSheet(
-            "QGroupBox{ margin-top:0px;} QGroupBox:title {margin-top: 0px;}"
-        )
+        group.setObjectName("notitle")
 
     if _type == "grid":
         grid = QGridLayout()
@@ -1810,7 +1807,7 @@ def automakegrid(grid: QGridLayout, lis, save=False, savelist=None):
             elif len(item) == 3:
                 wid, cols, arg = item
                 if type(wid) == str:
-                    wid = LLabel(wid)
+                    wid = QLabel(wid)
                     if arg == "link":
                         wid.setOpenExternalLinks(True)
                 elif arg == "group":
@@ -1854,6 +1851,7 @@ def makegrid(grid=None, save=False, savelist=None, savelay=None, delay=False):
             savelay.append(gridlay)
 
     __do = functools.partial(do, gridlay, grid, save, savelist, savelay)
+
     if not delay:
         __do()
         return gridlayoutwidget
@@ -1878,14 +1876,17 @@ def makescrollgrid(grid, lay, save=False, savelist=None, savelay=None):
 
 
 def makesubtab_lazy(
-    titles=None, functions=None, klass=None, callback=None, delay=False
+    titles=None, functions=None, klass=None, callback=None, delay=False, initial=None
 ):
     if klass:
-        tab = klass()
+        tab: LTabWidget = klass()
     else:
         tab = LTabWidget()
 
-    def __(t, i):
+    def __(t: LTabWidget, initial, i):
+        if initial:
+            object, key = initial
+            object[key] = i
         try:
             w = t.currentWidget()
             if "lazyfunction" in dir(w):
@@ -1896,14 +1897,20 @@ def makesubtab_lazy(
         if callback:
             callback(i)
 
-    tab.currentChanged.connect(functools.partial(__, tab))
+    can = initial and (initial[1] in initial[0])
+    if not can:
+        tab.currentChanged.connect(functools.partial(__, tab, initial))
 
-    def __do(tab, titles, functions):
+    def __do(tab: LTabWidget, titles, functions, initial):
         if titles and functions:
             for i, func in enumerate(functions):
                 tabadd_lazy(tab, titles[i], func)
+        if can:
+            tab.setCurrentIndex(initial[0][initial[1]])
+            tab.currentChanged.connect(functools.partial(__, tab, initial))
+            tab.currentChanged.emit(initial[0][initial[1]])
 
-    ___do = functools.partial(__do, tab, titles, functions)
+    ___do = functools.partial(__do, tab, titles, functions, initial)
     if not delay:
         ___do()
         return tab
@@ -1934,7 +1941,7 @@ class listediter(LDialog):
             self.hcmodel.removeRow(curr.row())
             self.internalrealname.pop(curr.row())
         elif action == copy:
-            winsharedutils.clipboard_set(self.hcmodel.itemFromIndex(curr).text())
+            gobject.baseobject.clipboardhelper.setText.emit(self.hcmodel.itemFromIndex(curr).text())
 
         elif action == up:
 
@@ -2304,6 +2311,10 @@ def getsimplepatheditor(
 class pixmapviewer(QWidget):
     tolastnext = pyqtSignal(int)
 
+    def wheelEvent(self, e: QWheelEvent) -> None:
+        self.tolastnext.emit([-1, 1][e.angleDelta().y() < 0])
+        return super().wheelEvent(e)
+
     def __init__(self, p=None) -> None:
         super().__init__(p)
         self.pix = None
@@ -2382,28 +2393,69 @@ class pixmapviewer(QWidget):
 
 
 class statusbutton(QPushButton):
-    statuschanged = pyqtSignal(int)
 
-    def __init__(self, icons, colors):
-        super().__init__()
-        self.idx = 0
-        self.icons = icons
-        self.colors = colors
-        self.clicked.connect(self.setChecked)
+    def __init__(self, icons, colors=None, border=True, p=None):
+        super().__init__(p)
+        if colors:
+            self.colors = colors
+        else:
+            self.colors = ["", ""]
+        if isinstance(icons, str):
+            self.icons = [icons, icons]
+        else:
+            self.icons = icons
+        self.setCheckable(True)
         self.seticon()
+        self.clicked.connect(self.seticon)
+        if not border:
+            self.setStyleSheet("border:transparent")
 
     def seticon(self):
-        color = QColor(self.colors[self.idx])
+        color = QColor(self.colors[self.isChecked()])
         if not self.isEnabled():
             color = disablecolor(color)
-        icon = qtawesome.icon(self.icons[self.idx], color=color)
+        icon = qtawesome.icon(self.icons[self.isChecked()], color=color)
         self.setIcon(icon)
 
     def setChecked(self, a0):
         super().setChecked(a0)
-        self.idx += 1
-        self.idx %= 2
-        self.statuschanged.emit(self.idx)
+        self.seticon()
+
+    def setEnabled(self, _):
+        super().setEnabled(_)
+        self.seticon()
+
+
+class IconButton(QPushButton):
+    def sizeHint(self):
+        return QSize(
+            int(1.42 * globalconfig["buttonsize2"]),
+            int(1.42 * globalconfig["buttonsize2"]),
+        )
+
+    def __init__(self, icon, enable=True, qicon=None, parent=None):
+        super().__init__(parent)
+        self._icon = icon
+        self._qicon = qicon
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setIconSize(self.sizeHint())
+        self.setStyleSheet("border:transparent")
+        self.setEnabled(enable)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+    def seticon(self):
+        if self._qicon:
+            icon = self._qicon
+        else:
+            __ = QColor(globalconfig["buttoncolor2"])
+            if not self.isEnabled():
+                __ = disablecolor(__)
+            icon: QIcon = qtawesome.icon(self._icon, color=__)
+        self.setIcon(icon)
+
+    def setChecked(self, a0):
+        super().setChecked(a0)
         self.seticon()
 
     def setEnabled(self, _):
@@ -2459,15 +2511,34 @@ def clearlayout(ll: QLayout):
         item = ll.takeAt(0)
         if not item:
             continue
-        ll.removeItem(item)
         w = item.widget()
         if w:
+            w.hide()
             w.deleteLater()
             continue
         l = item.layout()
         if l:
             clearlayout(l)
             l.deleteLater()
+            continue
+
+
+def showhidelayout(ll: QLayout, vis):
+    for _ in range(ll.count()):
+        item = ll.itemAt(_)
+        if not item:
+            continue
+        w = item.widget()
+        if w:
+            if vis:
+                if not w.isVisible():
+                    w.setVisible(True)
+            else:
+                w.setVisible(False)
+            continue
+        l = item.layout()
+        if l:
+            showhidelayout(l, vis)
             continue
 
 
@@ -2483,16 +2554,6 @@ class FQLineEdit(QLineEdit):
         # 点击浏览器后，无法重新获取焦点。
         windows.SetFocus(int(self.winId()))
         return super().mousePressEvent(a0)
-
-
-class LRButton(LPushButton):
-    rightclick = pyqtSignal()
-
-    def mouseReleaseEvent(self, ev: QMouseEvent) -> None:
-        if self.rect().contains(ev.pos()):
-            if ev.button() == Qt.MouseButton.RightButton:
-                self.rightclick.emit()
-        return super().mouseReleaseEvent(ev)
 
 
 class VisLFormLayout(LFormLayout):
@@ -2519,7 +2580,7 @@ class VisLFormLayout(LFormLayout):
     def setRowVisible(self, row_index, visible):
         if isinstance(row_index, int):
             pass
-        elif isinstance(row_index, QWidget):
+        elif isinstance(row_index, (QWidget, QLayout)):
             row_index = self._reverse[row_index]
         if self._row_vis[row_index] == visible:
             return
@@ -2530,13 +2591,175 @@ class VisLFormLayout(LFormLayout):
                 super().insertRow(insert_position, label, field)
             else:
                 super().insertRow(insert_position, field)
-            if not field.isVisible():
-                field.setVisible(True)
+            if isinstance(field, QWidget):
+                if not field.isVisible():
+                    field.setVisible(True)
+            else:
+                showhidelayout(field, True)
         else:
             tres = self.takeRow(insert_position)
             label = tres.labelItem
             if label is not None:
                 self.removeItem(label)
                 label.widget().deleteLater()
-            tres.fieldItem.widget().hide()
+            if tres.fieldItem.widget():
+                tres.fieldItem.widget().hide()
+            else:
+                showhidelayout(tres.fieldItem.layout(), False)
         self._row_vis[row_index] = visible
+
+
+class CollapsibleBox(QGroupBox):
+    def __init__(self, delayloadfunction=None, parent=None, margin0=True):
+        super(CollapsibleBox, self).__init__(parent)
+        self.setObjectName("notitle")
+        lay = QVBoxLayout(self)
+        if margin0:
+            lay.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(lay)
+        self.func = delayloadfunction
+        self.toggle(False)
+
+    def toggle(self, checked):
+        if checked and self.func:
+            self.func(self.layout())
+            self.func = None
+        self.setVisible(checked)
+
+
+class CollapsibleBoxWithButton(QWidget):
+
+    def __init__(self, delayloadfunction=None, title="", parent=None):
+        super(CollapsibleBoxWithButton, self).__init__(parent)
+        self.toggle_button = LToolButton(text=title, checkable=True, checked=False)
+        self.toggle_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.toggle_button.toggled.connect(self.toggled)
+        self.content_area = CollapsibleBox(delayloadfunction, self)
+        lay = QVBoxLayout(self)
+        lay.setSpacing(0)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self.toggle_button)
+        lay.addWidget(self.content_area)
+        self.toggled(False)
+
+    def toggled(self, checked):
+        self.toggle_button.setChecked(checked)
+        self.content_area.toggle(checked)
+        self.toggle_button.setIcon(
+            qtawesome.icon("fa.chevron-down" if checked else "fa.chevron-right")
+        )
+
+
+class editswitchTextBrowser(QWidget):
+    textChanged = pyqtSignal(str)
+
+    def heightForWidth(self, w):
+        return self.browser.heightForWidth(w)
+
+    def resizeEvent(self, a0):
+        self.switch.move(self.width() - self.switch.width(), 0)
+        return super().resizeEvent(a0)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        stack = QStackedWidget()
+        self.edit = QPlainTextEdit()
+        self.browser = QLabel()
+        self.browser.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.browser.setWordWrap(True)
+        self.browser.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.edit.textChanged.connect(
+            lambda: (
+                self.browser.setText(
+                    "<html>"
+                    + re.sub(
+                        r'href="([^"]+)"',
+                        "",
+                        re.sub(r'src="([^"]+)"', "", self.edit.toPlainText()),
+                    )
+                    + "</html>"
+                ),
+                self.textChanged.emit(self.edit.toPlainText()),
+            )
+        )
+        stack.addWidget(self.browser)
+        stack.addWidget(self.edit)
+        l = QHBoxLayout()
+        self.setLayout(l)
+        l.setContentsMargins(0, 0, 0, 0)
+        l.addWidget(stack)
+        self.switch = statusbutton(
+            p=self,
+            icons="fa.edit",
+            colors=["", globalconfig["buttoncolor2"]],
+            border=False,
+        )
+        self.switch.setFixedSize(QSize(25, 25))
+        self.switch.raise_()
+        self.switch.clicked.connect(stack.setCurrentIndex)
+
+    def settext(self, text):
+        self.edit.setPlainText(text)
+
+    def text(self):
+        return self.edit.toPlainText()
+
+
+class FlowWidget(QWidget):
+    def __init__(self, parent=None, groups=3):
+        super().__init__(parent)
+        self.margin = QMargins(5, 5, 5, 5)
+        self.spacing = 5
+        self._item_list = [[] for _ in range(groups)]
+
+    def insertWidget(self, group, index, w: QWidget):
+        w.setParent(self)
+        w.show()
+        self._item_list[group].insert(index, w)
+        self.doresize()
+
+    def addWidget(self, group, w: QWidget):
+        self.insertWidget(group, len(self._item_list[group]), w)
+
+    def removeWidget(self, w: QWidget):
+        for _ in self._item_list:
+            if w in _:
+                _.remove(w)
+                w.deleteLater()
+                self.doresize()
+                break
+
+    def doresize(self):
+        line_height = 0
+        spacing = self.spacing
+        y = self.margin.left()
+        for listi in self._item_list:
+            x = self.margin.top()
+            for i, item in enumerate(listi):
+
+                next_x = x + item.sizeHint().width() + spacing
+                if (
+                    next_x - spacing + self.margin.right() > self.width()
+                    and line_height > 0
+                ):
+                    x = self.margin.top()
+                    y = y + line_height + spacing
+                    next_x = x + item.sizeHint().width() + spacing
+
+                size = item.sizeHint()
+                if (i == len(listi) - 1) and isinstance(item, editswitchTextBrowser):
+                    w = self.width() - self.margin.right() - x
+                    size = QSize(w, max(size.height(), item.heightForWidth(w)))
+
+                item.setGeometry(QRect(QPoint(x, y), size))
+                line_height = max(line_height, size.height())
+                x = next_x
+            y = y + line_height + spacing
+        self.setFixedHeight(y + self.margin.bottom() - spacing)
+
+    def resizeEvent(self, a0):
+        self.doresize()

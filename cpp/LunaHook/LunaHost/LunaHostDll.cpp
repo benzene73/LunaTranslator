@@ -30,6 +30,7 @@ std::optional<T> checkoption(bool check, T &&t)
         return std::move(t);
     return {};
 }
+
 C_LUNA_API void Luna_Start(ProcessEvent Connect, ProcessEvent Disconnect, ThreadEvent_maybe_embed Create, ThreadEvent Destroy, OutputCallback Output, HostInfoHandler hostinfo, HookInsertHandler hookinsert, EmbedCallback embed)
 {
     Host::StartEx(
@@ -49,10 +50,12 @@ C_LUNA_API void Luna_Start(ProcessEvent Connect, ProcessEvent Disconnect, Thread
         checkoption(embed, [=](const std::wstring &output, const ThreadParam &tp)
                     { embed(output.c_str(), tp); }));
 }
+#if 0
 C_LUNA_API void Luna_Inject(DWORD pid, LPCWSTR basepath)
 {
     Host::InjectProcess(pid, basepath);
 }
+#endif
 C_LUNA_API bool Luna_CreatePipeAndCheck(DWORD pid)
 {
     return Host::CreatePipeAndCheck(pid);
@@ -70,7 +73,10 @@ C_LUNA_API void Luna_Settings(int flushDelay, bool filterRepetition, int default
     TextThread::maxBufferSize = maxBufferSize;
     TextThread::maxHistorySize = maxHistorySize;
 }
-
+C_LUNA_API void Luna_SetLanguage(const char* lang)
+{
+    Host::SetLanguage(lang);
+}
 C_LUNA_API void Luna_InsertPCHooks(DWORD pid, int which)
 {
     Host::InsertPCHooks(pid, which);
@@ -99,7 +105,7 @@ C_LUNA_API void Luna_FindHooks(DWORD pid, SearchParam sp, findhookcallback_t fin
                             wcscpy_s(hookcode,HOOKCODE_LEN, hp.hookcode);
                             findhookcallback(hookcode,text.c_str()); });
 }
-C_LUNA_API void Luna_EmbedSettings(DWORD pid, UINT32 waittime, UINT8 fontCharSet, bool fontCharSetEnabled, wchar_t *fontFamily, UINT32 keeprawtext, bool fastskipignore)
+C_LUNA_API void Luna_EmbedSettings(DWORD pid, UINT32 waittime, UINT8 fontCharSet, bool fontCharSetEnabled, wchar_t *fontFamily, Displaymode displaymode, bool fastskipignore)
 {
     auto sm = Host::GetCommonSharedMem(pid);
     if (!sm)
@@ -108,7 +114,7 @@ C_LUNA_API void Luna_EmbedSettings(DWORD pid, UINT32 waittime, UINT8 fontCharSet
     sm->fontCharSet = fontCharSet;
     sm->fontCharSetEnabled = fontCharSetEnabled;
     wcscpy_s(sm->fontFamily, 100, fontFamily);
-    sm->keeprawtext = keeprawtext;
+    sm->displaymode = displaymode;
     sm->fastskipignore = fastskipignore;
 }
 C_LUNA_API bool Luna_checkisusingembed(ThreadParam tp)

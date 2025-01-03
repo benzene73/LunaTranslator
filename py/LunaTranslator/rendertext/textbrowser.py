@@ -1,8 +1,7 @@
-from PyQt5.QtGui import QMouseEvent
 from qtsymbols import *
 from myutils.config import globalconfig, static_data
 from rendertext.somefunctions import dataget
-import gobject, functools, importlib, winsharedutils, uuid
+import gobject, functools, importlib
 from traceback import print_exc
 from rendertext.textbrowser_imp.base import base
 from gui.dynalang import LAction
@@ -176,7 +175,7 @@ class TextBrowser(QWidget, dataget):
         if action == search:
             gobject.baseobject.searchwordW.search_word.emit(curr, False)
         elif action == copy:
-            winsharedutils.clipboard_set(curr)
+            gobject.baseobject.clipboardhelper.setText.emit(curr)
         elif action == tts:
             gobject.baseobject.read_text(curr)
         elif action == translate:
@@ -459,7 +458,7 @@ class TextBrowser(QWidget, dataget):
 
             layout = QTextLayout()
             layout.setFont(font)
-            layout.setTextOption(QTextOption(Qt.AlignLeft))
+            layout.setTextOption(QTextOption(Qt.AlignmentFlag.AlignLeft))
             layout.setText(linetext)
             layout.beginLayout()
             newtag = []

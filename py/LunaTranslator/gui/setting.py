@@ -39,6 +39,8 @@ class TabWidget(QWidget):
         self.tab_widget.tabBar().hide()
         self.splitter.addWidget(self.list_widget)
         self.splitter.addWidget(self.tab_widget)
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
         self.currentChanged.connect(
             self.tab_widget.setCurrentIndex
         )  # 监听 Tab 切换事件
@@ -120,14 +122,21 @@ class Setting(closeashidewindow):
         )
         self.setCentralWidget(self.tab_widget)
         do()
-        width = 0
-        fn = QFont()
-        fn.setPointSizeF(globalconfig["settingfontsize"] + 4)
-        fn.setFamily(globalconfig["settingfonttype"])
-        fm = QFontMetrics(fn)
-        for title in _TRL(self.tab_widget.titles):
-            width = max(fm.size(0, title).width(), width)
-        width += 50
-        self.tab_widget.splitter.setStretchFactor(0, 0)
-        self.tab_widget.splitter.setStretchFactor(1, 1)
-        self.tab_widget.splitter.setSizes([width, self.tab_widget.width() - width])
+
+        if globalconfig.get("setting_split"):
+            self.tab_widget.splitter.setSizes(globalconfig["setting_split"])
+        else:
+            width = 0
+            fn = QFont()
+            fn.setPointSizeF(globalconfig["settingfontsize"] + 4)
+            fn.setFamily(globalconfig["settingfonttype"])
+            fm = QFontMetrics(fn)
+            for title in _TRL(self.tab_widget.titles):
+                width = max(fm.size(0, title).width(), width)
+            width += 50
+            self.tab_widget.splitter.setSizes([width, self.tab_widget.width() - width])
+
+        def __(_):
+            globalconfig["setting_split"] = self.tab_widget.splitter.sizes()
+
+        self.tab_widget.splitter.splitterMoved.connect(__)

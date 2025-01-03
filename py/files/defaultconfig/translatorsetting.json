@@ -21,7 +21,7 @@
 	},
 	"deepl": {
 		"args": {
-			"usewhich": 0,
+			"usewhich": 2,
 			"github": "https://github.com/OwO-Network/DeepLX",
 			"api": "http://127.0.0.1:1188/translate",
 			"chromepath": "",
@@ -276,19 +276,7 @@
 	},
 	"sugoix": {
 		"args": {
-			"api": "http://127.0.0.1:14366/",
-			"V8": "{main_server}/Resource/translate/Sugoi_Translator_V8.7z",
-			"V10.1": "{main_server}/Resource/translate/Sugoi_Translator_V10.1.7z"
-		},
-		"argstype": {
-			"V8": {
-				"type": "label",
-				"islink": true
-			},
-			"V10.1": {
-				"type": "label",
-				"islink": true
-			}
+			"api": "http://127.0.0.1:14366/"
 		}
 	},
 	"huoshanapi": {
@@ -389,6 +377,18 @@
 		"args": {
 			"BASE_URL": "https://api.anthropic.com",
 			"model": "claude-3-5-sonnet-latest",
+			"modellistcache": [
+				"claude-3-5-sonnet-latest",
+				"claude-3-5-sonnet-20241022",
+				"claude-3-5-sonnet-20240620",
+				"claude-3-opus-latest",
+				"claude-3-opus-20240229",
+				"claude-3-sonnet-20240229",
+				"claude-3-haiku-20240307",
+				"claude-2.1",
+				"claude-2.0",
+				"claude-instant-1.2"
+			],
 			"API_KEY": "",
 			"max_tokens": 2048,
 			"Temperature": 0.3,
@@ -431,18 +431,8 @@
 			"model": {
 				"rank": 1,
 				"type": "lineedit_or_combo",
-				"list": [
-					"claude-3-5-sonnet-latest",
-					"claude-3-5-sonnet-20241022",
-					"claude-3-5-sonnet-20240620",
-					"claude-3-opus-latest",
-					"claude-3-opus-20240229",
-					"claude-3-sonnet-20240229",
-					"claude-3-haiku-20240307",
-					"claude-2.1",
-					"claude-2.0",
-					"claude-instant-1.2"
-				]
+				"list_function": "list_models",
+				"list_cache": "modellistcache"
 			},
 			"API_KEY": {
 				"name": "API Key",
@@ -475,7 +465,7 @@
 			"Temperature": {
 				"type": "spin",
 				"min": 0,
-				"max": 1,
+				"max": 2,
 				"step": 0.1
 			}
 		}
@@ -554,7 +544,7 @@
 			},
 			"frequency_penalty": {
 				"type": "spin",
-				"min": 0,
+				"min": -2,
 				"max": 2,
 				"step": 0.05
 			},
@@ -584,7 +574,7 @@
 			"Temperature": {
 				"type": "spin",
 				"min": 0,
-				"max": 1,
+				"max": 2,
 				"step": 0.1
 			}
 		}
@@ -661,7 +651,7 @@
 			"Temperature": {
 				"type": "spin",
 				"min": 0,
-				"max": 1,
+				"max": 2,
 				"step": 0.1
 			}
 		}
@@ -947,7 +937,7 @@
 			"Temperature": {
 				"type": "spin",
 				"min": 0,
-				"max": 1,
+				"max": 2,
 				"step": 0.1
 			}
 		}
@@ -1037,7 +1027,7 @@
 			},
 			"frequency_penalty": {
 				"type": "spin",
-				"min": 0,
+				"min": -2,
 				"max": 2,
 				"step": 0.05
 			}
@@ -1117,7 +1107,7 @@
 			},
 			"frequency_penalty": {
 				"type": "spin",
-				"min": 0,
+				"min": -2,
 				"max": 2,
 				"step": 0.05
 			},
@@ -1147,7 +1137,7 @@
 			"Temperature": {
 				"type": "spin",
 				"min": 0,
-				"max": 1,
+				"max": 2,
 				"step": 0.1
 			}
 		}

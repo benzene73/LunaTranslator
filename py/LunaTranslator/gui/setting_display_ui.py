@@ -17,6 +17,7 @@ from gui.usefulwidget import (
     makesubtab_lazy,
     makescrollgrid,
     getsmalllabel,
+    getboxlayout,
 )
 
 
@@ -99,16 +100,15 @@ def createhorizontal_slider_tool(self):
     self.horizontal_slider_tool.valueChanged.connect(
         functools.partial(changeHorizontal_tool, self)
     )
-    return self.horizontal_slider_tool
-
-
-def createhorizontal_slider_tool_label(self):
 
     self.horizontal_slider_tool_label = QLabel()
     self.horizontal_slider_tool_label.setText(
         "{}%".format(globalconfig["transparent_tool"])
     )
-    return self.horizontal_slider_tool_label
+    return getboxlayout(
+        [self.horizontal_slider_tool, self.horizontal_slider_tool_label],
+        makewidget=True,
+    )
 
 
 def createfontcombo():
@@ -284,13 +284,6 @@ def mainuisetting(self):
                     type="grid",
                     grid=(
                         [
-                            "不透明度",
-                            (
-                                functools.partial(createhorizontal_slider, self),
-                                0,
-                            ),
-                        ],
-                        [
                             "背景颜色",
                             D_getcolorbutton(
                                 globalconfig,
@@ -306,15 +299,13 @@ def mainuisetting(self):
                                 parent=self,
                             ),
                             "",
-                            "圆角_半径",
-                            D_getspinbox(
-                                0,
-                                100,
-                                globalconfig,
-                                "yuanjiao_r",
-                                callback=lambda _: gobject.baseobject.translation_ui.set_color_transparency(),
+                            "不透明度",
+                            (
+                                functools.partial(createhorizontal_slider, self),
+                                -1,
                             ),
-                            "",
+                        ],
+                        [
                             "可选取的",
                             D_getsimpleswitch(
                                 globalconfig,
@@ -324,6 +315,15 @@ def mainuisetting(self):
                                 ),
                                 parent=self,
                                 name="selectable_btn",
+                            ),
+                            "",
+                            "圆角_半径",
+                            D_getspinbox(
+                                0,
+                                100,
+                                globalconfig,
+                                "yuanjiao_r",
+                                callback=lambda _: gobject.baseobject.translation_ui.set_color_transparency(),
                             ),
                         ],
                     ),
@@ -338,17 +338,6 @@ def mainuisetting(self):
                     title="工具栏",
                     type="grid",
                     grid=(
-                        [
-                            "不透明度",
-                            (
-                                functools.partial(createhorizontal_slider_tool, self),
-                                0,
-                            ),
-                            functools.partial(
-                                createhorizontal_slider_tool_label,
-                                self,
-                            ),
-                        ],
                         [
                             "背景颜色",
                             D_getcolorbutton(
@@ -365,6 +354,13 @@ def mainuisetting(self):
                                 parent=self,
                             ),
                             "",
+                            "不透明度",
+                            (
+                                functools.partial(createhorizontal_slider_tool, self),
+                                -1,
+                            ),
+                        ],
+                        [
                             "工具按钮颜色",
                             getboxlayout(
                                 [
@@ -398,10 +394,6 @@ def mainuisetting(self):
                                 makewidget=True,
                             ),
                             "",
-                            "",
-                            "",
-                        ],
-                        [
                             "锁定工具栏",
                             D_getsimpleswitch(
                                 globalconfig,

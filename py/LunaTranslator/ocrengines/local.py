@@ -36,7 +36,7 @@ class ocrpoints(Structure):
 
 class ocrwrapper:
     def __init__(self, det, rec, key) -> None:
-        self.dll = CDLL(gobject.GetDllpath(("LunaOCR32.dll", "LunaOCR64.dll")))
+        self.dll = CDLL(gobject.GetDllpath("LunaOCR.dll"))
         self.pOcrObj = None
         self.__OcrInit(det, rec, key)
 
@@ -88,44 +88,62 @@ class ocrwrapper:
         _OcrDestroy(self.pOcrObj)
 
 
+def findmodel(langcode):
+
+    check = lambda path: (
+        os.path.exists(path + "/det.onnx")
+        and os.path.exists(path + "/rec.onnx")
+        and os.path.exists(path + "/dict.txt")
+    )
+    for path in [
+        "./files/ocrmodel/{}".format(langcode),
+        "cache/ocrmodel/{}".format(langcode),
+    ]:
+        if check(path):
+            return path
+
+
 def getallsupports():
-    langs = []
-    for f in os.listdir("./files/ocr"):
-        path = "./files/ocr/{}".format(f)
-        if not (
-            os.path.exists(path + "/det.onnx")
-            and os.path.exists(path + "/rec.onnx")
-            and os.path.exists(path + "/dict.txt")
-        ):
-            continue
-        langs.append(f)
-    return langs
+    validlangs = []
+    for d in ["./files/ocrmodel", "cache/ocrmodel"]:
+        if os.path.exists(d):
+            for lang in os.listdir(d):
+                if findmodel(lang):
+                    validlangs.append(lang)
+    return validlangs
 
 
 def dodownload(combo: QComboBox, allsupports: list):
+    if not allsupports:
+        return
     lang = allsupports[combo.currentIndex()]
     gobject.baseobject.openlink(
         dynamiclink("{main_server}/Resource/ocr_models/" + lang + ".zip")
     )
 
 
-def doinstall(self, combo: QComboBox, allsupports: list, parent, callback):
-    lang = allsupports[combo.currentIndex()]
-    f = QFileDialog.getOpenFileName(parent, filter=lang + ".zip")
+def doinstall(self, allsupports: list, parent, callback):
+    if not allsupports:
+        return
+    f = QFileDialog.getOpenFileName(
+        parent, filter="model ({})".format(" ".join([_ + ".zip" for _ in allsupports]))
+    )
     fn = f[0]
     if not fn:
         return
     try:
         with zipfile.ZipFile(fn) as zipf:
-            zipf.extractall("files/ocr")
-        getQMessageBox(self, "成功", "安装成功")
+            zipf.extractall("cache/ocrmodel")
+        getQMessageBox(self, "成功", "添加成功")
         callback()
     except:
         print_exc()
 
 
-def question(dialog: QDialog):
+def question():
+    dialog = QWidget()
     formLayout = LFormLayout()
+    formLayout.setContentsMargins(0, 0, 0, 0)
     dialog.setLayout(formLayout)
     supportlang = LLabel()
     formLayout.addRow("当前支持的语言", supportlang)
@@ -149,12 +167,13 @@ def question(dialog: QDialog):
     btndownload.clicked.connect(functools.partial(dodownload, combo, allsupports))
     btninstall = LPushButton("添加")
     btninstall.clicked.connect(
-        functools.partial(doinstall, dialog, combo, allsupports, dialog, callback)
+        functools.partial(doinstall, combo, allsupports, dialog, callback)
     )
     formLayout.addRow(
         "添加语言包",
-        getboxlayout([combo, btndownload, btninstall], makewidget=True),
+        getboxlayout([combo, btndownload, btninstall], makewidget=True, margin0=True),
     )
+    return dialog
 
 
 class OCR(baseocr):
@@ -167,22 +186,11 @@ class OCR(baseocr):
         self._savelang = None
         self.checkchange()
 
-    def checklangvalid(self, langcode):
-        path = "./files/ocr/{}".format(langcode)
-        return (
-            os.path.exists(path + "/det.onnx")
-            and os.path.exists(path + "/rec.onnx")
-            and os.path.exists(path + "/dict.txt")
-        )
-
     def checkchange(self):
         if self._savelang == self.srclang:
             return
         if self.srclang == "auto":
-            validlangs = []
-            for lang in os.listdir("./files/ocr"):
-                if self.checklangvalid(lang):
-                    validlangs.append(lang)
+            validlangs = getallsupports()
             if len(validlangs) == 1:
                 uselang = validlangs[0]
             elif len(validlangs) == 0:
@@ -190,7 +198,7 @@ class OCR(baseocr):
             else:
                 self.raise_cant_be_auto_lang()
         else:
-            if self.checklangvalid(self.srclang):
+            if findmodel(self.srclang):
                 uselang = self.srclang
             else:
                 raise Exception(
@@ -206,7 +214,7 @@ class OCR(baseocr):
                 )
 
         self._ocr = None
-        path = "./files/ocr/{}".format(uselang)
+        path = findmodel(uselang)
         self._ocr = ocrwrapper(
             path + "/det.onnx", path + "/rec.onnx", path + "/dict.txt"
         )

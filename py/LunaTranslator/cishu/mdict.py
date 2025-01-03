@@ -1,6 +1,27 @@
 import math, base64, uuid, gobject
 from cishu.cishubase import DictTree
-from myutils.config import isascii
+from myutils.config import isascii, globalconfig
+from traceback import print_exc
+from myutils.audioplayer import bass_code_cast
+import json, os
+
+cachejson = None
+
+
+def query_mime(ext):
+    # https://gist.github.com/AshHeskes/6038140
+    global cachejson
+    if not cachejson:
+        with open(
+            os.path.join(
+                os.path.dirname(__file__), "file-extension-to-mime-types.json"
+            ),
+            "r",
+            encoding="utf8",
+        ) as ff:
+            cachejson = json.load(ff)
+    return cachejson.get(ext, "application/octet-stream")
+
 
 class FlexBuffer:
 
@@ -1682,18 +1703,36 @@ import hashlib
 
 class IndexBuilder(object):
     # todo: enable history
+    def checkinfo(self, fn):
+        return "{}_{}".format(os.path.getmtime(fn), os.path.getsize(fn))
+
+    def checkneedupdate(self, md, db):
+        if not os.path.isfile(db):
+            return True
+        need = True
+        try:
+            with open(db + ".txt", "r") as ff:
+                need = self.checkinfo(md) != ff.read()
+        except:
+            pass
+        return need
+
+    def checkneedupdateafter(self, md, db):
+        with open(db + ".txt", "w") as ff:
+            ff.write(self.checkinfo(md))
+
     def __init__(
         self,
         fname,
         encoding="",
         passcode=None,
-        force_rebuild=False,
         enable_history=False,
         sql_index=True,
         check=False,
     ):
         self._mdx_file = fname
-        self._mdd_file = ""
+        self._mdd_files = []
+        self._mdd_dbs = []
         self._encoding = ""
         self._stylesheet = {}
         self._title = ""
@@ -1712,12 +1751,8 @@ class IndexBuilder(object):
         _targetfilenamebase = gobject.getcachedir("mdict/index/" + _mdxmd5)
         self._mdx_db = _targetfilenamebase + ".mdx.db"
         # make index anyway
-        if force_rebuild:
-            self._make_mdx_index(self._mdx_db)
-            if os.path.isfile(_filename + ".mdd"):
-                self._mdd_file = _filename + ".mdd"
-                self._mdd_db = _targetfilenamebase + ".mdd.db"
-                self._make_mdd_index(self._mdd_db)
+
+        self._make_mdx_index_checked(self._mdx_db)
 
         if os.path.isfile(self._mdx_db):
             # read from META table
@@ -1727,18 +1762,6 @@ class IndexBuilder(object):
             # 判断有无版本号
             for cc in cursor:
                 self._version = cc[1]
-            ################# if not version in fo #############
-            if not self._version:
-                print("version info not found")
-                conn.close()
-                self._make_mdx_index(self._mdx_db)
-                print("mdx.db rebuilt!")
-                if os.path.isfile(_filename + ".mdd"):
-                    self._mdd_file = _filename + ".mdd"
-                    self._mdd_db = _targetfilenamebase + ".mdd.db"
-                    self._make_mdd_index(self._mdd_db)
-                    print("mdd.db rebuilt!")
-                return None
             cursor = conn.execute('SELECT * FROM META WHERE key = "encoding"')
             for cc in cursor:
                 self._encoding = cc[1]
@@ -1754,27 +1777,20 @@ class IndexBuilder(object):
             for cc in cursor:
                 self._description = cc[1]
 
-            # for cc in cursor:
-            #    if cc[0] == 'encoding':
-            #        self._encoding = cc[1]
-            #        continue
-            #    if cc[0] == 'stylesheet':
-            #        self._stylesheet = json.loads(cc[1])
-            #        continue
-            #    if cc[0] == 'title':
-            #        self._title = cc[1]
-            #        continue
-            #    if cc[0] == 'title':
-            #        self._description = cc[1]
-        else:
-            self._make_mdx_index(self._mdx_db)
+        self.makemdds(_filename, _targetfilenamebase)
 
-        if os.path.isfile(_filename + ".mdd"):
-            self._mdd_file = _filename + ".mdd"
-            self._mdd_db = _targetfilenamebase + ".mdd.db"
-            if not os.path.isfile(self._mdd_db):
-                self._make_mdd_index(self._mdd_db)
-        pass
+    def makemdds(self, _filename, _targetfilenamebase):
+        i = 0
+        while True:
+            extra = "" if i == 0 else ".%d" % i
+            i += 1
+            end = extra + ".mdd"
+            if os.path.isfile(_filename + end):
+                self._mdd_files.append(_filename + end)
+                self._mdd_dbs.append(_targetfilenamebase + end + ".db")
+                self._make_mdd_index_checked(self._mdd_files[-1], self._mdd_dbs[-1])
+            else:
+                break
 
     def _replace_stylesheet(self, txt):
         # substitute stylesheet definition
@@ -1788,6 +1804,16 @@ class IndexBuilder(object):
             else:
                 txt_styled = txt_styled + style[0] + p + style[1]
         return txt_styled
+
+    def _make_mdd_index_checked(self, mdd, db_name):
+        if self.checkneedupdate(mdd, db_name):
+            self._make_mdd_index(mdd, db_name)
+            self.checkneedupdateafter(mdd, db_name)
+
+    def _make_mdx_index_checked(self, db_name):
+        if self.checkneedupdate(self._mdx_file, db_name):
+            self._make_mdx_index(db_name)
+            self.checkneedupdateafter(self._mdx_file, db_name)
 
     def _make_mdx_index(self, db_name):
         if os.path.exists(db_name):
@@ -1866,11 +1892,10 @@ class IndexBuilder(object):
         self._title = meta["title"]
         self._description = meta["description"]
 
-    def _make_mdd_index(self, db_name):
+    def _make_mdd_index(self, mdd_file, db_name):
         if os.path.exists(db_name):
             os.remove(db_name)
-        mdd = MDD(self._mdd_file)
-        self._mdd_db = db_name
+        mdd = MDD(mdd_file)
         index_list = mdd.get_index(check_block=self._check)
         conn = sqlite3.connect(db_name)
         c = conn.cursor()
@@ -1989,10 +2014,11 @@ class IndexBuilder(object):
 
     def mdd_lookup(self, keyword, ignorecase=None):
         lookup_result_list = []
-        indexes = self.lookup_indexes(self._mdd_db, keyword, ignorecase)
-        with open(self._mdd_file, "rb") as mdd_file:
-            for index in indexes:
-                lookup_result_list.append(self.get_mdd_by_index(mdd_file, index))
+        for i in range(len(self._mdd_files)):
+            indexes = self.lookup_indexes(self._mdd_dbs[i], keyword, ignorecase)
+            with open(self._mdd_files[i], "rb") as mdd_file:
+                for index in indexes:
+                    lookup_result_list.append(self.get_mdd_by_index(mdd_file, index))
         return lookup_result_list
 
     @staticmethod
@@ -2013,7 +2039,10 @@ class IndexBuilder(object):
             return keys
 
     def get_mdd_keys(self, query=""):
-        return self.get_keys(self._mdd_db, query)
+        _ = []
+        for f in self._mdd_dbs:
+            _.extend(self.get_keys(f, query))
+        return _
 
     def get_mdx_keys(self, query=""):
         return self.get_keys(self._mdx_db, query)
@@ -2076,21 +2105,16 @@ class mdict(cishubase):
 
             except:
                 print(f)
-                from traceback import print_exc
 
                 print_exc()
 
-    def init(self):
-        try:
-            with open("userconfig/mdict_config.json", "r", encoding="utf8") as ff:
-                self.extraconf = json.loads(ff.read())
-        except:
-            self.extraconf = {}
-        paths = self.config["paths"]
-
+    def checkpath(self):
+        if self.config["paths"] == self.paths:
+            return
+        self.paths = self.config["paths"]
         self.builders = []
         self.dedump = set()
-        for f in paths:
+        for f in self.paths:
             if f.strip() == "":
                 continue
             if not os.path.exists(f):
@@ -2105,6 +2129,14 @@ class mdict(cishubase):
                     _f = os.path.join(_dir, _f)
                     self.init_once_mdx(_f)
 
+    def init(self):
+        try:
+            with open("userconfig/mdict_config.json", "r", encoding="utf8") as ff:
+                self.extraconf = json.loads(ff.read())
+        except:
+            self.extraconf = {}
+        self.paths = None
+        self.checkpath()
         try:
             with open(
                 gobject.getuserconfigdir("mdict_config.json"), "w", encoding="utf8"
@@ -2127,7 +2159,6 @@ class mdict(cishubase):
             if dis <= distance:
                 results.append(k)
                 diss[k] = dis
-
         return sorted(results, key=lambda x: diss[x])[: self.config["max_num"]]
 
     def parse_strings(self, input_string):
@@ -2238,48 +2269,19 @@ class mdict(cishubase):
         # print(html)
         return html
 
-    def get_mime_type_from_magic(self, magic_bytes):
-        if magic_bytes.startswith(b"OggS"):
-            return "audio/ogg"
-        elif magic_bytes.startswith(b"\x1A\x45\xDF\xA3"):  # EBML header (Matroska)
-            return "video/webm"
-        elif (
-            magic_bytes.startswith(b"\x52\x49\x46\x46") and magic_bytes[8:12] == b"WEBP"
-        ):
-            return "image/webp"
-        elif magic_bytes.startswith(b"\xFF\xD8\xFF"):
-            return "image/jpeg"
-        elif magic_bytes.startswith(b"\x89\x50\x4E\x47\x0D\x0A\x1A\x0A"):
-            return "image/png"
-        elif magic_bytes.startswith(b"GIF87a") or magic_bytes.startswith(b"GIF89a"):
-            return "image/gif"
-        elif magic_bytes.startswith(b"\x00\x00\x01\xBA") or magic_bytes.startswith(
-            b"\x00\x00\x01\xB3"
-        ):
-            return "video/mpeg"
-        elif magic_bytes.startswith(b"\x49\x44\x33") or magic_bytes.startswith(
-            b"\xFF\xFB"
-        ):
-            return "audio/mpeg"
-        else:
-            return "application/octet-stream"
+    def parse_url_in_mdd(self, index: IndexBuilder, url1: str):
+        url1 = url1.replace("/", "\\")
+        if not url1.startswith("\\"):
+            if url1.startswith("."):
+                url1 = url1[1:]
+            else:
+                url1 = "\\" + url1
+        find = index.mdd_lookup(url1)
+        if not find:
+            return None
+        return find[0]
 
-    def parseaudio(self, html_content, url, file_content):
-        base64_content = base64.b64encode(file_content).decode("utf-8")
-
-        uid = str(uuid.uuid4())
-        # with open(uid+'.mp3','wb') as ff:
-        #     ff.write(file_content)
-        audio = '<audio controls id="{}" style="display: none"><source src="data:{};base64,{}"></audio>'.format(
-            uid, self.get_mime_type_from_magic(file_content), base64_content
-        )
-        html_content = audio + html_content.replace(
-            url,
-            "javascript:document.getElementById('{}').play()".format(uid),
-        )
-        return html_content
-
-    def tryloadurl(self, index: IndexBuilder, base, url: str):
+    def tryloadurl(self, index: IndexBuilder, base, url: str, audiob64vals: dict):
         _local = os.path.join(base, url)
         iscss = url.lower().endswith(".css")
         _type = 0
@@ -2291,157 +2293,82 @@ class mdict(cishubase):
                 file_content = f.read()
             return _type, file_content
 
-        if url.startswith("#"):  # a href # 页内跳转
-            return -1, None
-
-        url1 = url.replace("/", "\\")
-        if not url1.startswith("\\"):
-            url1 = "\\" + url1
-        try:
-            file_content = index.mdd_lookup(url1)[0]
-        except:
-            pass
-        if file_content:
-            return _type, file_content
-
-        func = url.split(r"://")[0]
-        if func == "entry":
-            return -1, None
-        url1 = url.split(r"://")[1]
-        url1 = url1.replace("/", "\\")
-
-        if not url1.startswith("\\"):
-            url1 = "\\" + url1
-        try:
-            file_content = index.mdd_lookup(url1)[0]
-        except:
-            return None
-        if func == "sound":
-            _type = 2
+        if url.startswith("entry://"):
+            return 3, "javascript:safe_mdict_search_word('{}')".format(url[8:])
+        if url.startswith("sound://"):
+            file_content = self.parse_url_in_mdd(index, url[8:])
+            if not file_content:
+                return
+            ext = os.path.splitext(url)[1].lower()[1:]
+            if True:  # ext in ("aac", "spx", "opus"):
+                new, ext = bass_code_cast(file_content, fr=ext)
+                file_content = new
+            varname = "var_" + hashlib.md5(file_content).hexdigest()
+            audiob64vals[varname] = base64.b64encode(file_content).decode()
+            return 3, "javascript:mdict_play_sound('{}',{})".format(
+                query_mime("." + ext), varname
+            )
+        file_content = self.parse_url_in_mdd(index, url)
+        if not file_content:
+            return
         return _type, file_content
 
-    def tryparsecss(self, html_content, url, file_content, divid):
-        try:
-            file_content = file_content.decode("utf8")
-        except:
-            return html_content
-        try:
-            from tinycss2 import parse_stylesheet, serialize
-            from tinycss2.ast import (
-                HashToken,
-                WhitespaceToken,
-                AtRule,
-                QualifiedRule,
-                ParseError,
-            )
-
-            rules = parse_stylesheet(file_content, True, True)
-
-            def parseaqr(rule: QualifiedRule):
-                start = True
-                idx = 0
-                skip = False
-                for token in rule.prelude.copy():
-                    if skip and token.type == "whitespace":
-                        skip = False
-                        idx += 1
-                        continue
-                    if start:
-                        if token.type == "ident" and token.value == "body":
-                            # body
-                            rule.prelude.insert(idx + 1, HashToken(0, 0, divid, True))
-                            rule.prelude.insert(idx + 1, WhitespaceToken(0, 0, " "))
-                            idx += 2
-                        else:
-                            # .id tag
-                            # tag
-                            # #class tag
-                            rule.prelude.insert(idx, WhitespaceToken(0, 0, " "))
-                            rule.prelude.insert(idx, HashToken(0, 0, divid, True))
-                            idx += 2
-                        start = False
-                    elif token.type == "literal" and token.value == ",":
-                        # 有多个限定符
-                        start = True
-                        skip = True
-                    idx += 1
-
-            class shitrule(AtRule):
-                def __init__(self, __):
-                    super().__init__(0, 0, " ", " ", [], [])
-                    self.__ = __
-
-                def _serialize_to(self, _):
-                    return _(self.__)
-
-            def parserules(rules):
-                # print(stylesheet)
-                for i, rule in enumerate(rules.copy()):
-                    if isinstance(rule, AtRule):
-                        if not rule.content:
-                            # @charset "UTF-8";
-                            continue
-                        internal = "".join([_.serialize() for _ in rule.content])
-                        internal = parse_stylesheet(internal, True, True)
-                        if len(internal) and isinstance(internal[0], ParseError):
-                            # @font-face
-                            continue
-                        # @....{ .klas{} }
-                        internal = parserules(internal)
-                        ser = "@"
-                        ser += rule.at_keyword
-                        ser += "{"
-                        for _ in internal:
-                            ser += _.serialize()
-                        ser += "}"
-                        # rule.serialize=functools.partial(__,ser)
-                        rules[i] = shitrule(ser)
-                    elif isinstance(rule, QualifiedRule):
-                        parseaqr(rules[i])
-                return rules
-
-            file_content = serialize(parserules(rules))
-            # print(file_content)
-        except:
-            from traceback import print_exc
-
-            print_exc()
-        base64_content = base64.b64encode(file_content.encode("utf8")).decode("utf-8")
-        html_content = html_content.replace(
-            url, "data:text/css;base64," + base64_content
-        )
-        return html_content
-
-    def repairtarget(self, index, base, html_content):
-
-        src_pattern = r'src="([^"]+)"'
-        href_pattern = r'href="([^"]+)"'
-
-        src_matches = re.findall(src_pattern, html_content)
-        href_matches = re.findall(href_pattern, html_content)
-        divid = "luna_internal_" + str(uuid.uuid4())
-        for url in src_matches + href_matches:
+    def repairtarget(
+        self,
+        index,
+        fn,
+        html_content: str,
+        audiob64vals: dict,
+        hrefsrcvals: dict,
+        divclass: str,
+        csscollect: dict,
+    ):
+        base = os.path.dirname(fn)
+        matches = []
+        for _type, patt in (
+            ("src", 'src="([^"]+)"'),
+            ("href", 'href="([^"]+)"'),
+            ("src", """src='([^']+)'"""),
+            ("href", """href='([^']+)'"""),
+        ):
+            matches += [(_type, _) for _ in re.findall(patt, html_content)]
+        for _type_1, url in matches:
+            if (
+                url.startswith("#")
+                or url.startswith("https:")
+                or url.startswith("http:")
+            ):
+                continue
             try:
-                file_content = self.tryloadurl(index, base, url)
+                file_content = self.tryloadurl(index, base, url, audiob64vals)
             except:
-                print("unknown", url)
+                print_exc()
+                print("unknown", fn, url)
                 continue
             if not file_content:
-                print(url)
+                print(fn, url)
                 continue
             _type, file_content = file_content
             if _type == -1:
                 continue
+            elif _type == 3:
+                html_content = html_content.replace(url, file_content)
             elif _type == 1:
-                html_content = self.tryparsecss(html_content, url, file_content, divid)
-            elif _type == 2:
-                html_content = self.parseaudio(html_content, url, file_content)
-            elif _type == 0:
-                base64_content = base64.b64encode(file_content).decode("utf-8")
-                html_content = html_content.replace(
-                    url, "data:application/octet-stream;base64," + base64_content
+                css = self.parse_stylesheet(
+                    file_content.decode("utf8", errors="ignore"), divclass
                 )
-        return '<div id="{}">{}</div>'.format(divid, html_content)
+                if css:
+                    csscollect[url] = css
+                    html_content = html_content.replace(url, "")
+            elif _type == 0:
+                varname = "var_" + hashlib.md5(file_content).hexdigest()
+                hrefsrcvals[varname] = (
+                    _type_1,
+                    query_mime(os.path.splitext(url)[1].lower()),
+                    base64.b64encode(file_content).decode(),
+                )
+                html_content = html_content.replace(url, varname)
+        return '<div class="{}">{}</div>'.format(divclass, html_content)
 
     def searchthread_internal(self, index, k, __safe):
         allres = []
@@ -2457,7 +2384,7 @@ class mdict(cishubase):
                 allres.append(content)
         return allres
 
-    def searchthread(self, allres, i, word):
+    def searchthread(self, allres, i, word, audiob64vals, hrefsrcvals):
         f, index = self.builders[i]
         results = []
         try:
@@ -2465,41 +2392,58 @@ class mdict(cishubase):
             # print(keys)
             for k in keys:
                 __safe = []
-                for content in set(self.searchthread_internal(index, k, __safe)):
+                for content in sorted(
+                    set(self.searchthread_internal(index, k, __safe))
+                ):
                     results.append(self.parseashtml(content))
         except:
-            from traceback import print_exc
 
             print_exc()
+        if not results:
+            return
+        divclass = "luna_" + str(uuid.uuid4())
+        csscollect = {}
         for i in range(len(results)):
-            results[i] = self.repairtarget(index, os.path.dirname(f), results[i])
-        if len(results):
-            allres.append(
-                (
-                    self.getpriority(f),
-                    self.getFoldFlow(f),
-                    self.gettitle(f, index),
-                    "".join(results),
-                )
+            results[i] = self.repairtarget(
+                index, f, results[i], audiob64vals, hrefsrcvals, divclass, csscollect
             )
+        collectresult = "".join(results)
+        if csscollect:
+            collectresult += "<style>\n"
+            for css in csscollect.values():
+                collectresult += css + "\n"
+            collectresult += "</style>\n"
+        allres.append(
+            (
+                self.getpriority(f),
+                self.getFoldFlow(f),
+                self.gettitle(f, index),
+                collectresult,
+            )
+        )
 
     def generatehtml_tabswitch(self, allres):
         btns = []
         contents = []
         idx = 0
         for _, foldflow, title, res in allres:
-            idx += 1
+            klass2 = "tab-pane_mdict_internal"
+            klass1 = "tab-button_mdict_internal"
+            if idx == 0:
+                klass2 += " active"
+                klass1 += " active"
             btns.append(
-                """<button type="button" onclick="onclickbtn_mdict_internal('buttonid_mdict_internal{idx}')" id="buttonid_mdict_internal{idx}" class="tab-button_mdict_internal" data-tab="tab_mdict_internal{idx}">{title}</button>""".format(
-                    idx=idx, title=title
+                """<button type="button" onclick="onclickbtn_mdict_internal('buttonid_mdict_internal{idx}')" id="buttonid_mdict_internal{idx}" class="{klass}" data-tab="tab_mdict_internal{idx}">{title}</button>""".format(
+                    idx=idx, title=title, klass=klass1
                 )
             )
             contents.append(
-                """<div id="tab_mdict_internal{idx}" class="tab-pane_mdict_internal">{res}</div>""".format(
-                    idx=idx, res=res
+                """<div id="tab_mdict_internal{idx}" class="{klass}">{res}</div>""".format(
+                    idx=idx, res=res, klass=klass2
                 )
             )
-        commonstyle = """
+            idx += 1
+        res = """
 <script>
 function onclickbtn_mdict_internal(_id) {
     tabPanes = document.querySelectorAll('.tab-widget_mdict_internal .tab-pane_mdict_internal');
@@ -2531,6 +2475,7 @@ function onclickbtn_mdict_internal(_id) {
     border: none;
     cursor: pointer;
     display: inline-block;
+    line-height: 25px;
 }
 
 .tab-widget_mdict_internal .tab-button_mdict_internal.active {
@@ -2539,18 +2484,15 @@ function onclickbtn_mdict_internal(_id) {
 
 .tab-widget_mdict_internal .tab-content_mdict_internal .tab-pane_mdict_internal {
     display: none;
+    padding: 10px;
 }
 
 .tab-widget_mdict_internal .tab-content_mdict_internal .tab-pane_mdict_internal.active {
     display: block;
 }
-</style>
-"""
-
-        res = """
-    {commonstyle}
+</style>"""
+        res += """
 <div class="tab-widget_mdict_internal">
-
     <div class="centerdiv_mdict_internal"><div>
         {btns}
     </div>
@@ -2561,12 +2503,8 @@ function onclickbtn_mdict_internal(_id) {
         </div>
     </div>
 </div>
-<script>
-if(document.querySelectorAll('.tab-widget_mdict_internal .tab-button_mdict_internal').length)
-document.querySelectorAll('.tab-widget_mdict_internal .tab-button_mdict_internal')[0].click()
-</script>
 """.format(
-            commonstyle=commonstyle, btns="".join(btns), contents="".join(contents)
+            btns="".join(btns), contents="".join(contents)
         )
         return res
 
@@ -2578,7 +2516,7 @@ document.querySelectorAll('.tab-widget_mdict_internal .tab-button_mdict_internal
     
     .collapsible-header {
         background-color: #dddddd50;
-        padding: 10px;
+        padding: 8px;
         cursor: pointer;
         border: 1px solid #ddd;
         border-bottom: none;
@@ -2588,8 +2526,7 @@ document.querySelectorAll('.tab-widget_mdict_internal .tab-button_mdict_internal
         display: none;
         padding: 10px;
         border: 1px solid #ddd;
-    }</style>"""
-        content += """
+    }</style>
 <script>
 function mdict_flowstyle_clickcallback(_id)
 {
@@ -2608,38 +2545,74 @@ if (content.style.display === 'block') {
                 extra = "display: none;"
             uid = str(uuid.uuid4())
             lis.append(
-                r"""<li><div class="collapsible-header" id="{}" onclick="mdict_flowstyle_clickcallback('{}')">{}</div><div class="collapsible-content" style="{}">
+                r"""<div><div class="collapsible-header" id="{}" onclick="mdict_flowstyle_clickcallback('{}')">{}</div><div class="collapsible-content" style="{}">
                {}
-            </div></li>""".format(uid,uid,title,extra,res)
+            </div></div>""".format(
+                    uid, uid, title, extra, res
+                )
             )
         content += r"""
-<ul class="collapsible-list">
+<div class="collapsible-list">
          {}
-    </ul>""".format(''.join(lis))
+    </div>""".format(
+            "".join(lis)
+        )
 
         return content
 
     def search(self, word):
+        self.checkpath()
         allres = []
-        # threads = []
-        # for i in range(len(self.builders)):
-        #     threads.append(
-        #         threading.Thread(target=self.searchthread, args=(allres, i, word))
-        #     )
-
-        # for _ in threads:
-        #     _.start()
-        # for _ in threads:
-        #     _.join()
+        audiob64vals = {}
+        hrefsrcvals = {}
         for i in range(len(self.builders)):
-            self.searchthread(allres, i, word)
+            self.searchthread(allres, i, word, audiob64vals, hrefsrcvals)
         if len(allres) == 0:
             return
         allres.sort(key=lambda _: -_[0])
+        func = "<script>"
+        func += """
+function replacelongvarsrcs(varval, varname)
+{
+let type=varval[0]
+let elements = document.querySelectorAll('['+type+'="'+varname+'"]');
+for(let i=0;i<elements.length;i++)
+    elements[i][type]="data:"+varval[1]+";base64," + varval[2]
+}
+var lastmusicplayer=false;
+function mdict_play_sound(ext, b64){
+
+if(window.luna_audio_play_b64)
+        window.luna_audio_play_b64(b64)
+    else if(window.LUNAJSObject)
+        window.LUNAJSObject.luna_audio_play_b64(b64)
+    else{
+    const music = new Audio();
+    music.src="data:"+ext+";base64,"+b64
+    if(lastmusicplayer!=false)
+    {
+        lastmusicplayer.pause()
+    }
+    lastmusicplayer=music
+    music.play();
+    }
+}
+function safe_mdict_search_word(word){
+    if(window.luna_search_word)
+        window.luna_search_word(word)
+    else if(window.LUNAJSObject)
+        window.LUNAJSObject.luna_search_word(word)
+}"""
+        for varname, val in audiob64vals.items():
+            func += '{}="{}"\n'.format(varname, val)
+        for varname, (_type, mime, val) in hrefsrcvals.items():
+            func += '{}=["{}","{}","{}"]\n'.format(varname, _type, mime, val)
+            func += 'replacelongvarsrcs({},"{}")\n'.format(varname, varname)
+        func += "</script>"
         if self.config["stylehv"] == 0:
-            return self.generatehtml_tabswitch(allres)
+            return self.generatehtml_tabswitch(allres) + func
         elif self.config["stylehv"] == 1:
-            return self.generatehtml_flow(allres)
+            return self.generatehtml_flow(allres) + func
 
     def tree(self):
         if len(self.builders) == 0:
@@ -2655,7 +2628,7 @@ if (content.style.display === 'block') {
                 return self.ref.gettitle(self.f, self.index)
 
             def childrens(self) -> list:
-                return self.index.get_mdx_keys("*")
+                return sorted(list(set(self.index.get_mdx_keys("*"))))
 
         class DictTreeRoot(DictTree):
             def __init__(self, ref) -> None:

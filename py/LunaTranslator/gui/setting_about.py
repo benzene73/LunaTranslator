@@ -5,7 +5,7 @@ from myutils.config import globalconfig, static_data, _TR, get_platform
 from myutils.wrapper import threader, tryprint
 from myutils.hwnd import getcurrexe
 from myutils.utils import makehtml, getlanguse, dynamiclink
-import requests, sys
+import requests, importlib
 import shutil, gobject
 from myutils.proxy import getproxy
 import zipfile, os
@@ -13,11 +13,15 @@ import subprocess
 from gui.usefulwidget import (
     D_getsimpleswitch,
     makescrollgrid,
+    CollapsibleBoxWithButton,
     makesubtab_lazy,
     D_getsimplecombobox,
+    makegrid,
     D_getIconButton,
+    WebivewWidget,
 )
 from gui.dynalang import LLabel
+from gui.setting_year import yearsummary
 
 versionchecktask = queue.Queue()
 
@@ -247,39 +251,6 @@ def versionlabelmaybesettext(self, x):
         self.versionlabel_cache = x
 
 
-def solvelinkitems(grid, source):
-    name = source["name"]
-    link = source["link"]
-    grid.append([((name), 1, ""), (makehtml(link), 2, "link")])
-
-
-def resourcegrid(self, l):
-    titles = []
-    makewidgetsfunctions = []
-    for sourcetype in static_data["aboutsource"]:
-        titles.append(sourcetype["name"])
-        sources = sourcetype["sources"]
-        grid = []
-        for source in sources:
-
-            __grid = []
-            for link in source["links"]:
-                solvelinkitems(__grid, link)
-            grid.append(
-                [
-                    (
-                        dict(title=source.get("name", None), type="grid", grid=__grid),
-                        0,
-                        "group",
-                    )
-                ]
-            )
-        makewidgetsfunctions.append(functools.partial(makescrollgrid, grid))
-    tab, dotab = makesubtab_lazy(titles, makewidgetsfunctions, delay=True)
-    l.addWidget(tab)
-    dotab()
-
-
 def createimageview(self):
     lb = QLabel()
     img = QPixmap.fromImage(QImage("./files/zan.jpg"))
@@ -294,9 +265,52 @@ def createimageview(self):
     return lb
 
 
-def setTab_aboutlazy(self, basel):
+def changelog(self, basel: QHBoxLayout):
+    link = dynamiclink("{main_server}/ChangeLog")
+    try:
+        _ = WebivewWidget(self)
+        _.navigate(link)
+    except:
+        _ = QWidget()
+        os.startfile(link)
+    basel.addWidget(_)
 
-    resourcegrid(self, basel)
+
+def delayloadlinks(key, lay):
+    sources = static_data["aboutsource"][key]
+    grid = []
+    for source in sources:
+        __grid = []
+        function = source.get("function")
+        if function:
+            func = getattr(
+                importlib.import_module(function[0]),
+                function[1],
+            )
+            __grid.append([(func, 0)])
+        else:
+            for link in source["links"]:
+                __grid.append(
+                    [link["name"], (makehtml(link["link"]), 2, "link")]
+                    + ([link.get("about")] if link.get("about") else [])
+                )
+        grid.append(
+            [
+                (
+                    dict(title=source.get("name", None), type="grid", grid=__grid),
+                    0,
+                    "group",
+                )
+            ]
+        )
+    w, do = makegrid(grid, delay=True)
+    lay.addWidget(w)
+    do()
+
+
+def offlinelinks(key):
+    box = CollapsibleBoxWithButton(functools.partial(delayloadlinks, key), "下载")
+    return box
 
 
 def setTab_about1(self, basel):
@@ -356,15 +370,12 @@ def setTab_about1(self, basel):
 
 def setTab_about(self, basel):
     tab_widget, do = makesubtab_lazy(
-        [
-            "关于软件",
-            "其他设置",
-            "资源下载",
-        ],
+        ["关于软件", "其他设置", "更新记录", "年度总结"],
         [
             functools.partial(setTab_about1, self),
             functools.partial(setTab_update, self),
-            functools.partial(setTab_aboutlazy, self),
+            functools.partial(changelog, self),
+            functools.partial(yearsummary, self),
         ],
         delay=True,
     )
@@ -375,6 +386,10 @@ def setTab_about(self, basel):
 def changeUIlanguage(_):
     languageChangeEvent = QEvent(QEvent.Type.LanguageChange)
     QApplication.sendEvent(QApplication.instance(), languageChangeEvent)
+    try:
+        gobject.baseobject.textsource.setlang()
+    except:
+        pass
 
 
 def setTab_update(self, basel):

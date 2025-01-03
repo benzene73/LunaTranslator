@@ -30,7 +30,7 @@ namespace
     struct emfuncinfo
     {
         uint64_t type;
-        int argidx;
+        int offset;
         int padding;
         decltype(HookParam::text_fun) hookfunc;
         decltype(HookParam::filter_fun) filterfun;
@@ -46,7 +46,7 @@ namespace
 
         HookParam hp;
         hp.address = 0x3000;
-        hp.text_fun = [](hook_stack *stack, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
+        hp.text_fun = [](hook_context *context, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
         {
             static std::wstring last;
             // vita3k Vulkan模式GetWindowText会卡住
@@ -91,15 +91,12 @@ bool vita3k::attach_function()
     if (DoJitPtr == 0)
         return false;
     trygetgameinwindowtitle();
-    spDefault.isjithook = true;
-    spDefault.minAddress = 0;
-    spDefault.maxAddress = -1;
     HookParam hp;
     hp.address = DoJitPtr;
-    hp.text_fun = [](hook_stack *stack, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
+    hp.text_fun = [](hook_context *context, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
     {
-        auto descriptor = *argidx(stack, idxDescriptor + 1); // r8
-        auto entrypoint = *argidx(stack, idxEntrypoint + 1); // r9
+        auto descriptor = context->argof(idxDescriptor + 1); // r8
+        auto entrypoint = context->argof(idxEntrypoint + 1); // r9
         auto em_address = *(uint32_t *)descriptor;
         if (em_address < 0x80000000)
             em_address += 0x80000000; // 0.1.9 3339
@@ -117,10 +114,13 @@ bool vita3k::attach_function()
             HookParam hpinternal;
             hpinternal.address = entrypoint;
             hpinternal.emu_addr = em_address; // 用于生成hcode
-            hpinternal.type = USING_STRING | NO_CONTEXT | BREAK_POINT | op.type;
+            hpinternal.type = NO_CONTEXT | BREAK_POINT | op.type;
+            if (!(op.type & USING_CHAR))
+                hpinternal.type |= USING_STRING;
+            hpinternal.codepage = 932;
             hpinternal.text_fun = op.hookfunc;
             hpinternal.filter_fun = op.filterfun;
-            hpinternal.argidx = op.argidx;
+            hpinternal.offset = op.offset;
             hpinternal.padding = op.padding;
             hpinternal.jittype = JITTYPE::VITA3K;
             NewHook(hpinternal, op._id);
@@ -143,23 +143,27 @@ namespace
         s = std::regex_replace(s, std::regex("\n"), "");
         buffer->from(s);
     }
-    template <int idx>
-    void FPCSG01282(TextBuffer *buffer, HookParam *hp)
+    void FPCSG01282_1(TextBuffer *buffer, HookParam *hp)
     {
         auto s = buffer->strA();
         s = std::regex_replace(s, std::regex("(\\n)+"), " ");
         s = std::regex_replace(s, std::regex("\\d$|^@[a-z]+|#.*?#|\\$"), "");
+        buffer->from(s);
+    }
+    template <int idx>
+    void FPCSG01282(TextBuffer *buffer, HookParam *hp)
+    {
+        FPCSG01282_1(buffer, hp);
         static std::string last;
+        auto s = buffer->viewA();
         if (last == s)
             return buffer->clear();
         last = s;
-        buffer->from(s);
     }
 
-    template <int index>
-    void ReadU16TextAndLenDW(hook_stack *stack, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
+    void ReadU16TextAndLenDW(hook_context *context, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
     {
-        auto address = VITA3K::emu_arg(stack)[index];
+        auto address = VITA3K::emu_arg(context)[hp->offset];
         buffer->from(address + 0xC, (*(DWORD *)(address + 0x8)) * 2);
     }
 
@@ -197,9 +201,9 @@ namespace
         s = std::regex_replace(s, std::regex("#[A-Za-z]+\\[(\\d*[.])?\\d+\\]"), "");
         buffer->from(s);
     }
-    void TPCSG00903(hook_stack *stack, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
+    void TPCSG00903(hook_context *context, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
     {
-        auto address = VITA3K::emu_arg(stack)[0];
+        auto address = VITA3K::emu_arg(context)[0];
         buffer->from(address + 0x1C, (*(DWORD *)(address + 0x14)));
     }
     void FPCSG00903(TextBuffer *buffer, HookParam *hp)
@@ -245,9 +249,63 @@ namespace
         s = std::regex_replace(s, std::regex(R"(\\n)"), "");
         buffer->from(s);
     }
+    void PCSG00530(TextBuffer *buffer, HookParam *)
+    {
+        StringFilter(buffer, "#n", 2);
+    }
+    void PCSG00826(TextBuffer *buffer, HookParam *)
+    {
+        StringFilter(buffer, "#n", 2);
+        StringFilter(buffer, "\x81\x40", 2);
+    }
+    void PCSG00592(TextBuffer *buffer, HookParam *hp)
+    {
+        auto s = buffer->strA();
+        s = std::regex_replace(s, std::regex(R"(#Color\[\d+\])"), "");
+        buffer->from(s);
+    }
+    void PCSG00833(TextBuffer *buffer, HookParam *)
+    {
+        StringFilter(buffer, u8"　", strlen(u8"　"));
+    }
+    void PCSG00855(TextBuffer *buffer, HookParam *)
+    {
+        StringFilter(buffer, u8"#n　", strlen(u8"#n　"));
+    }
     void PCSG00787(TextBuffer *buffer, HookParam *)
     {
         CharFilter(buffer, '\n');
+    }
+    void PCSG01068(TextBuffer *buffer, HookParam *hp)
+    {
+        StringCharReplacer(buffer, "\\\\", 2, '\n');
+        CharFilter(buffer, '\\');
+        auto s = buffer->viewA();
+        if (endWith(s, u8"。!"))
+            buffer->from(s.substr(0, s.size() - 1));
+    }
+    void PCSG01167(TextBuffer *buffer, HookParam *hp)
+    {
+        auto s = buffer->strA();
+        s = std::regex_replace(s, std::regex(u8R"(<(.*?)>(.*?)\|)"), "$2");
+        buffer->from(s);
+    }
+    void PCSG00917(TextBuffer *buffer, HookParam *hp)
+    {
+        auto s = buffer->strA();
+        s = std::regex_replace(s, std::regex(u8R"(([^。…？！])　)"), "$1");
+        s = std::regex_replace(s, std::regex(u8R"(^　)"), "");
+        s = std::regex_replace(s, std::regex(u8R"(#n)"), "");
+        buffer->from(s);
+    }
+    void PCSG00938(TextBuffer *buffer, HookParam *hp)
+    {
+        auto s = buffer->strA();
+        s = std::regex_replace(s, std::regex(u8R"(([^。…？！])　)"), "$1");
+        s = std::regex_replace(s, std::regex(u8R"(^　)"), "");
+        s = std::regex_replace(s, std::regex(u8R"(#n)"), "");
+        s = std::regex_replace(s, std::regex(u8R"(#\w+\[\d+\]|!)"), "");
+        buffer->from(s);
     }
     void FPCSG00912(TextBuffer *buffer, HookParam *hp)
     {
@@ -268,6 +326,16 @@ namespace
         //.replace(/㍉/g, '!!')
         strReplace(s, "\x87\x60", "");
         strReplace(s, "\x87\x5f", "");
+        buffer->from(s);
+    }
+    void PCSG00472(TextBuffer *buffer, HookParam *hp)
+    {
+        auto s = buffer->strA();
+        strReplace(s, "\x81\x55", "!?");
+        strReplace(s, "\x81\x54", "!!");
+        strReplace(s, "\x81\x40", "");
+        s = std::regex_replace(s, std::regex("(#n)+"), "");
+        s = std::regex_replace(s, std::regex("#[A-Za-z]+\\[(\\d*[.])?\\d+\\]"), "");
         buffer->from(s);
     }
     void FPCSG00389(TextBuffer *buffer, HookParam *hp)
@@ -301,9 +369,39 @@ namespace
         Trim(ws);
         buffer->from(WideStringToString(ws));
     }
-    void PCSG00912(hook_stack *stack, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
+    void PCSG01046(hook_context *context, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
     {
-        auto address = VITA3K::emu_arg(stack)[1];
+        auto len = (*(DWORD *)(VITA3K::emu_arg(context)[0] + 8)) * 2;
+        auto pre = VITA3K::emu_arg(context)[0] + 0xC;
+        buffer->from(pre, len);
+        StringFilter(buffer, L"<br>", 4);
+    }
+    void PCSG01011(hook_context *context, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
+    {
+        auto address = VITA3K::emu_arg(context)[7];
+        while (*(char *)(address - 1))
+            address -= 1;
+        buffer->from((char *)address);
+        static std::string last;
+        auto s = buffer->strA();
+        if (s == last)
+        {
+            buffer->clear();
+            last = s;
+        }
+        else
+        {
+            last = s;
+            strReplace(s, "\n", "");
+            auto pos = s.find(u8"×");
+            if (pos != s.npos)
+                s = s.substr(pos + strlen(u8"×"));
+            buffer->from(s);
+        }
+    }
+    void PCSG00912(hook_context *context, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
+    {
+        auto address = VITA3K::emu_arg(context)[1];
         std::string final_string = "";
         BYTE pattern[] = {0x47, 0xff, 0xff};
         auto results = MemDbg::findBytes(pattern, sizeof(pattern), address, address + 0x50);
@@ -331,22 +429,22 @@ namespace
         }
         buffer->from(final_string);
     }
-    void TPCSG00291(hook_stack *stack, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
+    void TPCSG00291(hook_context *context, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
     {
-        auto a2 = VITA3K::emu_arg(stack)[0];
+        auto a2 = VITA3K::emu_arg(context)[0];
 
         auto vm = *(DWORD *)(a2 + (0x28));
-        vm = *(DWORD *)VITA3K::emu_addr(stack, vm);
-        vm = *(DWORD *)VITA3K::emu_addr(stack, vm + 8);
-        uintptr_t address = VITA3K::emu_addr(stack, vm);
+        vm = *(DWORD *)VITA3K::emu_addr(context, vm);
+        vm = *(DWORD *)VITA3K::emu_addr(context, vm + 8);
+        uintptr_t address = VITA3K::emu_addr(context, vm);
         auto len1 = *(DWORD *)(address + 4);
         auto p = address + 0x20;
         if (len1 > 4 && *(WORD *)(p + 2) == 0)
         {
             auto p1 = *(DWORD *)(address + 8);
-            vm = *(DWORD *)VITA3K::emu_addr(stack, vm);
-            vm = *(DWORD *)VITA3K::emu_addr(stack, vm + 0xC);
-            p = VITA3K::emu_addr(stack, vm);
+            vm = *(DWORD *)VITA3K::emu_addr(context, vm);
+            vm = *(DWORD *)VITA3K::emu_addr(context, vm + 0xC);
+            p = VITA3K::emu_addr(context, vm);
         }
         static int fm = 0;
         static std::string pre;
@@ -431,6 +529,16 @@ namespace
         last = s;
         buffer->from(s);
     }
+    void PCSG01036(TextBuffer *buffer, HookParam *hp)
+    {
+        auto s = buffer->strA();
+        static std::string last;
+        if (last == s)
+            return buffer->clear();
+        last = s;
+        strReplace(s, "#n", "");
+        buffer->from(s);
+    }
     void FPCSG00815(TextBuffer *buffer, HookParam *hp)
     {
         auto s = buffer->strA();
@@ -445,14 +553,9 @@ namespace
         s = std::regex_replace(s, std::regex(R"(#\w.+?])"), "");
         buffer->from(s);
     }
-    template <int idx>
-    void FPCSG00855_2(TextBuffer *buffer, HookParam *hp)
+    void FPCSG00855_2_1(TextBuffer *buffer, HookParam *hp)
     {
         auto s = buffer->strA();
-        static std::string last;
-        if (last == s)
-            return buffer->clear();
-        last = s;
         strReplace(s, u8"Χ", u8"、");
         strReplace(s, u8"Δ", u8"。");
         strReplace(s, u8"Λ", u8"っ");
@@ -466,6 +569,15 @@ namespace
         strReplace(s, u8"Ц", u8"】");
         buffer->from(s);
         FPCSG00855(buffer, hp);
+    }
+    template <int idx>
+    void FPCSG00855_2(TextBuffer *buffer, HookParam *hp)
+    {
+        auto s = buffer->viewA();
+        static std::string last;
+        if (last == s)
+            return buffer->clear();
+        FPCSG00855_2_1(buffer, hp);
     }
     void FPCSG00477(TextBuffer *buffer, HookParam *hp)
     {
@@ -495,7 +607,15 @@ namespace
             return buffer->clear();
         last = s;
     }
-
+    void F010052300F612000(TextBuffer *buffer, HookParam *hp)
+    {
+        auto s = buffer->strA();
+        s = std::regex_replace(s, std::regex(R"(#r(.*?)\|(.*?)#)"), "$1");
+        s = std::regex_replace(s, std::regex(R"(@r(.*?)@\d)"), "$1");
+        strReplace(s, R"(\c)", "");
+        strReplace(s, R"(\n)", "");
+        buffer->from(s);
+    }
     auto _ = []()
     {
         emfunctionhooks = {
@@ -507,9 +627,9 @@ namespace
             {0x80011f1a, {0, 0, 0, 0, FPCSG01282<2>, "PCSG01282"}}, // Name
             {0x8001ebac, {0, 1, 0, 0, FPCSG01282<3>, "PCSG01282"}}, // choices
             // 神凪ノ杜 五月雨綴り
-            {0x828bb50c, {CODEC_UTF16, 0, 0, ReadU16TextAndLenDW<0>, 0, "PCSG01268"}}, // dialogue
-            {0x828ba9b6, {CODEC_UTF16, 0, 0, ReadU16TextAndLenDW<0>, 0, "PCSG01268"}}, // name
-            {0x8060D376, {CODEC_UTF8, 0, 0, 0, 0, "PCSG01268"}},                       // vita3k v0.2.0 can't find 0x828bb50c && 0x828ba9b6, unknown reason.
+            {0x828bb50c, {CODEC_UTF16, 0, 0, ReadU16TextAndLenDW, 0, "PCSG01268"}}, // dialogue
+            {0x828ba9b6, {CODEC_UTF16, 0, 0, ReadU16TextAndLenDW, 0, "PCSG01268"}}, // name
+            {0x8060D376, {CODEC_UTF8, 0, 0, 0, 0, "PCSG01268"}},                    // vita3k v0.2.0 can't find 0x828bb50c && 0x828ba9b6, unknown reason.
             // 参千世界遊戯 ~MultiUniverse Myself~
             {0x8005ae24, {0, 0, 0, 0, 0, "PCSG01194"}}, // dialouge+name,sjis,need remap jis char,to complex
             // Marginal #4 Road to Galaxy
@@ -526,9 +646,9 @@ namespace
             {0x80070e30, {0, 2, 0, 0, FPCSG00751, "PCSG00751"}}, // all,sjis
             {0x80070cdc, {0, 1, 0, 0, FPCSG00751, "PCSG00751"}}, // text
             // もし、この世界に神様がいるとするならば。
-            {0x80c1f270, {CODEC_UTF16, 0, 0, ReadU16TextAndLenDW<0>, FPCSG00706, "PCSG00706"}}, // dialogue
-            {0x80d48bfc, {CODEC_UTF16, 0, 0, ReadU16TextAndLenDW<1>, FPCSG00706, "PCSG00706"}}, // Dictionary1
-            {0x80d48c20, {CODEC_UTF16, 0, 0, ReadU16TextAndLenDW<0>, FPCSG00706, "PCSG00706"}}, // Dictionary2
+            {0x80c1f270, {CODEC_UTF16, 0, 0, ReadU16TextAndLenDW, FPCSG00706, "PCSG00706"}}, // dialogue
+            {0x80d48bfc, {CODEC_UTF16, 1, 0, ReadU16TextAndLenDW, FPCSG00706, "PCSG00706"}}, // Dictionary1
+            {0x80d48c20, {CODEC_UTF16, 0, 0, ReadU16TextAndLenDW, FPCSG00706, "PCSG00706"}}, // Dictionary2
             // アンジェーリーク ルトゥール
             {0x8008bd1a, {0, 1, 0, 0, FPCSG00696, "PCSG00696"}}, // text1,sjis
             {0x8008cd48, {0, 0, 0, 0, FPCSG00696, "PCSG00696"}}, // text2
@@ -616,6 +736,99 @@ namespace
             {0x8002BB78, {CODEC_UTF8, 0, 0, 0, PCSG00787, "PCSG00787"}}, // zip安装版
             // ニセコイ　ヨメイリ！？
             {0x8189e60c, {CODEC_UTF8, 4, 0, 0, 0, "PCSG00397"}},
+            // DIABOLIK LOVERS DARK FATE
+            {0x8002CF8E, {0, 1, 0, 0, PCSG00530, "PCSG00530"}},
+            // DIABOLIK LOVERS VANDEAD CARNIVAL
+            {0x8007300E, {0, 5, 0, 0, PCSG00472, "PCSG00472"}},
+            // DIABOLIK LOVERS LOST EDEN
+            {0x8007443E, {0, 0, 0, 0, 0, "PCSG00910"}},
+            // DIABOLIK LOVERS LUNATIC PARADE
+            {0x800579EE, {0, 0, 0, 0, PCSG00826, "PCSG00826"}},
+            // NORN9 ACT TUNE
+            {0x8001E288, {CODEC_UTF8, 0, 0, 0, PCSG00833, "PCSG00833"}},
+            // 空蝉の廻
+            {0x82535242, {CODEC_UTF16 | USING_CHAR | DATA_INDIRECT, 1, 0, 0, 0, "PCSG01011"}}, // 后缀有人名，需要额外过滤
+            {0x801AE35A, {CODEC_UTF8, 7, 0, PCSG01011, 0, "PCSG01011"}},
+            // 真紅の焔 真田忍法帳
+            {0x80025064, {CODEC_UTF8, 0, 0, 0, PCSG00833, "PCSG01158"}},
+            // 月影の鎖　～狂爛モラトリアム～
+            {0x8007AA94, {0, 1, 0, 0, F010052300F612000, "PCSG00991"}},
+            // 月影の鎖　～錯乱パラノイア～
+            {0x8000E8E0, {0, 0, 0, 0, F010052300F612000, "PCSG00794"}},
+            // 源氏恋絵巻
+            {0x8002C640, {CODEC_UTF8, 1, 0, 0, 0, "PCSG00619"}},
+            // Starry☆Sky ~Spring Stories~ / Starry Sky ~Spring Stories~
+            {0x8003542e, {0, 3, 0, 0, FPCSG00912, "PCSG00510"}},
+            {0x80033f2e, {0, 0, 0, 0, FPCSG00912, "PCSG00510"}},
+            {0x8002c5b8, {0, 0, 8, 0, FPCSG00912, "PCSG00510"}},
+            // Starry☆Sky ~Summer Stories~ / Starry Sky ~Summer Stories~
+            {0x80035634, {0, 3, 0, 0, FPCSG00912, "PCSG00916"}},
+            {0x80034114, {0, 0, 0, 0, FPCSG00912, "PCSG00916"}},
+            {0x8002c77a, {0, 0, 8, 0, FPCSG00912, "PCSG00916"}},
+            // Starry☆Sky ~Autumn Stories~ / Starry Sky ~Autumn Stories~
+            {0x80035b10, {0, 3, 0, 0, FPCSG00912, "PCSG00917"}}, // 1.00
+            {0x800345f0, {0, 0, 0, 0, FPCSG00912, "PCSG00917"}},
+            {0x8002cc56, {0, 0, 8, 0, FPCSG00912, "PCSG00917"}},
+            {0x80035b2c, {0, 3, 0, 0, FPCSG00912, "PCSG00917"}}, // 1.01
+            {0x8003460c, {0, 0, 0, 0, FPCSG00912, "PCSG00917"}},
+            {0x8002cc72, {0, 0, 8, 0, FPCSG00912, "PCSG00917"}},
+            // Starry☆Sky ~Winter Stories~ / Starry Sky ~Winter Stories~
+            {0x80035a20, {0, 3, 0, 0, FPCSG00912, "PCSG00918"}},
+            {0x80034500, {0, 0, 0, 0, FPCSG00912, "PCSG00918"}},
+            {0x8002cb66, {0, 0, 8, 0, FPCSG00912, "PCSG00918"}},
+            // ワンドオブフォーチュン R
+            {0x8008128a, {CODEC_UTF8, 0, 0, 0, PCSG00917, "PCSG00917"}}, // 1.00
+            {0x800345f0, {CODEC_UTF8, 0, 0, 0, PCSG00917, "PCSG00917"}},
+            {0x8002cc56, {CODEC_UTF8, 8, 0, 0, PCSG00917, "PCSG00917"}},
+            {0x8008134e, {CODEC_UTF8, 0, 0, 0, PCSG00917, "PCSG00917"}}, // 1.01
+            {0x80081378, {CODEC_UTF8, 0, 0, 0, PCSG00917, "PCSG00917"}},
+            {0x8002cb8c, {CODEC_UTF8, 8, 0, 0, PCSG00917, "PCSG00917"}},
+            // ワンド オブ フォーチュン Ｒ２ ～時空に沈む黙示録～
+            {0x8006c986, {CODEC_UTF8, 0, 0, 0, PCSG00938, "PCSG00938"}},
+            {0x8006c9b0, {CODEC_UTF8, 0, 0, 0, PCSG00938, "PCSG00938"}},
+            {0x8001a860, {CODEC_UTF8, 8, 0, 0, PCSG00938, "PCSG00938"}},
+            {0x80022bd2, {CODEC_UTF8, 4, 0x14, 0, PCSG00938, "PCSG00938"}},
+            {0x80022bf0, {CODEC_UTF8, 5, 0, 0, PCSG00938, "PCSG00938"}},
+            // I DOLL U
+            {0x8000AC70, {CODEC_UTF8, 0, 0, 0, PCSG00833, "PCSG00592"}}, // 需要自己替换#Name[1] #Name[2]
+            {0x8000AE7E, {CODEC_UTF8, 4, 0, 0, PCSG00592, "PCSG00592"}},
+            // ピリオドキューブ～鳥籠のアマデウス～
+            {0x8000BDF2, {CODEC_UTF8, 5, 0, 0, PCSG00530, "PCSG00853"}},
+            // 花朧 ～戦国伝乱奇～
+            {0x80024C08, {CODEC_UTF8, 5, 0, 0, PCSG00592, "PCSG00855"}},
+            {0x8000D544, {CODEC_UTF8, 0, 0, 0, PCSG00855, "PCSG00855"}},
+            // ロミオVSジュリエット 全巻パック
+            {0x80017F50, {CODEC_UTF8, 1, 0, 0, PCSG00787, "PCSG00618"}},
+            // １２時の鐘とシンデレラ～シンデレラシリーズ　トリプル全巻パック～
+            {0x8001701C, {CODEC_UTF8, 1, 0, 0, PCSG00787, "PCSG00561"}},
+            // ハートの国のアリス～Wonderful Wonder World～
+            {0x8100F0CA, {CODEC_UTF8, 1, 0, 0, PCSG00787, "PCSG00614"}}, // 手动解压
+            {0x800173F4, {CODEC_UTF8, 1, 0, 0, PCSG00787, "PCSG00614"}},
+            // 新装版魔法使いとご主人様～Wizard and The Master～
+            {0x8001733C, {CODEC_UTF8, 1, 0, 0, PCSG00787, "PCSG00580"}},
+            // 円環のメモーリア -カケラ灯し-
+            {0x80029AB2, {0, 0, 0, 0, PCSG01167, "PCSG01167"}},
+            // ネオ アンジェリーク 天使の涙
+            {0x8005426C, {CODEC_UTF8, 0, 0, 0, PCSG01068, "PCSG01068"}},
+            // スカーレッドライダーゼクス Rev.
+            {0x800BEE38, {CODEC_UTF8, 0, 0, 0, PCSG00787, "PCSG00745"}},
+            // 緋色の欠片 ～おもいいろの記憶～
+            {0x8007838c, {CODEC_UTF8, 5, 0, 0, PCSG01036, "PCSG01036"}},
+            {0x8001154c, {CODEC_UTF8, 8, 0, 0, PCSG01036, "PCSG01036"}},
+            {0x800879ee, {CODEC_UTF8, 2, 0, 0, PCSG01036, "PCSG01036"}},
+            // 嘘月シャングリラ
+            {0x81e1f5c8, {CODEC_UTF16, 0, 0, PCSG01046, 0, "PCSG01046"}},
+            {0x81e4a514, {CODEC_UTF16, 0, 0, PCSG01046, 0, "PCSG01046"}},
+            // 罪喰い～千の呪い、千の祈り～ for V
+            {0x80080cd0, {0, 0, 0, 0, 0, "PCSG01019"}},
+            {0x8001c73e, {0, 1, 0, 0, 0, "PCSG01019"}},
+            // LOVE:QUIZ ~恋する乙女のファイナルアンサー~
+            {0x8003acba, {CODEC_UTF16, 0, 0, 0, 0, "PCSG00667"}},
+            {0x80016dd6, {CODEC_UTF16, 1, 0, 0, 0, "PCSG00667"}},
+            // DRAMAtical Murder
+            {0x8004630a, {0, 0, 0, 0, FPCSG00852, "PCSG00420"}},
+            {0x8003eed2, {0, 0, 0, 0, FPCSG00852, "PCSG00420"}},
+
         };
         return 1;
     }();

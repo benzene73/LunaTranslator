@@ -4,7 +4,6 @@ from myutils.utils import splitocrtypes
 from myutils.config import globalconfig, _TR, get_platform
 from gui.inputdialog import (
     multicolorset,
-    autoinitdialogx,
     autoinitdialog_items,
     autoinitdialog,
 )
@@ -21,7 +20,7 @@ from gui.usefulwidget import (
     D_getcolorbutton,
     D_getsimplecombobox,
 )
-from gui.showword import showdiction
+from gui.setting_about import offlinelinks
 
 
 def setTabcishu(self, basel):
@@ -146,7 +145,7 @@ def initinternal(self, names):
             line += [
                 D_getIconButton(
                     callback=functools.partial(
-                        autoinitdialogx,
+                        autoinitdialog,
                         self,
                         globalconfig["cishu"][cishu]["args"],
                         globalconfig["cishu"][cishu]["name"],
@@ -168,6 +167,7 @@ def initinternal(self, names):
         i += 1
     if len(line):
         cishugrid.append(line)
+    cishugrid[-1] += [""] * (4 + 4 + 3 - len(cishugrid[-1]))
     return cishugrid
 
 
@@ -216,6 +216,7 @@ def setTabcishu_l(self):
         )
     ]
     grids = [
+        [(functools.partial(offlinelinks, "dict"), 0)],
         grids_1,
         grids2,
         [],
@@ -298,10 +299,7 @@ def setTabcishu_l(self):
                                 lambda: gobject.baseobject.searchwordW.showsignal.emit(),
                                 "fa.search",
                             ),
-                            D_getIconButton(
-                                lambda: showdiction(self).show(),
-                                "fa.book",
-                            ),
+                            "",
                             "",
                             "辞书显示顺序",
                             D_getIconButton(

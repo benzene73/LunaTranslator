@@ -112,7 +112,7 @@
 namespace
 { // unnamed
 
-  void SpecialHookWillPlus(hook_stack *stack, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
+  void SpecialHookWillPlus(hook_context *context, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
   {
     // static DWORD detect_offset; // jichi 1/18/2015: this makes sure it only runs once
     // if (detect_offset)
@@ -124,7 +124,7 @@ namespace
       WORD *pw;
       BYTE *pb;
     };
-    retn = stack->retaddr; // jichi 1/18/2015: dynamically find function return address
+    retn = context->retaddr; // jichi 1/18/2015: dynamically find function return address
     i = 0;
     while (*pw != 0xc483)
     { // add esp, $
@@ -146,7 +146,7 @@ namespace
 
       // Still extract the first text
       // hp->type ^= EXTERN_HOOK;
-      char *str = *(char **)(stack->base + hp->offset);
+      char *str = *(char **)(context->base + hp->offset);
       buffer->from(str);
       *split = 0; // 8/3/2014 jichi: use return address as split
     }
@@ -252,10 +252,10 @@ namespace
     return text + prefix;
   }
 
-  void SpecialHookWillPlusA(hook_stack *stack, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
+  void SpecialHookWillPlusA(hook_context *context, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
   {
     int index = 0;
-    auto text = (LPCSTR)stack->eax;
+    auto text = (LPCSTR)context->eax;
     if (!text)
       return;
     if (index) // index == 1 is name
@@ -269,18 +269,12 @@ namespace
   }
   void WillPlus_extra_filter(TextBuffer *buffer, HookParam *)
   {
-
     StringFilter(buffer, L"%XS", 5); // remove %XS followed by 2 chars
     std::wstring str = buffer->strW();
     strReplace(str, L"\\n", L"\n");
-    std::wregex reg1(L"\\{(.*?):(.*?)\\}");
-    std::wstring result1 = std::regex_replace(str, reg1, L"$1");
-
-    std::wregex reg11(L"\\{(.*?);(.*?)\\}");
-    result1 = std::regex_replace(result1, reg11, L"$1");
-
-    std::wregex reg2(L"%[A-Z]+");
-    result1 = std::regex_replace(result1, reg2, L"");
+    std::wstring result1 = std::regex_replace(str, std::wregex(L"\\{(.*?):(.*?)\\}"), L"$1");
+    result1 = std::regex_replace(result1, std::wregex(L"\\{(.*?);(.*?)\\}"), L"$1");
+    result1 = std::regex_replace(result1, std::wregex(L"%[A-Z]+"), L"");
     buffer->from(result1);
   };
   bool InsertWillPlusAHook()
@@ -296,7 +290,7 @@ namespace
 
       myhp.type = CODEC_UTF16 | NO_CONTEXT | USING_STRING;
 
-      myhp.offset = get_reg(regs::eax);
+      myhp.offset = regoffset(eax);
       myhp.filter_fun = WillPlus_extra_filter;
       char nameForUser[HOOK_NAME_SIZE] = "WillPlus3_memcpy";
 
@@ -325,9 +319,9 @@ namespace
     return NewHook(hp, "WillPlusA");
   }
 
-  void SpecialHookWillPlusW(hook_stack *stack, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
+  void SpecialHookWillPlusW(hook_context *context, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
   {
-    auto text = (LPCWSTR)stack->ecx;
+    auto text = (LPCWSTR)context->ecx;
     if (!text || !*text)
       return;
     size_t len;
@@ -440,7 +434,7 @@ namespace
       HookParam hp;
       hp.address = addr + 3;
       hp.type = USING_STRING | CODEC_UTF16 | DATA_INDIRECT;
-      hp.offset = get_reg(regs::ecx);
+      hp.offset = regoffset(ecx);
       hp.index = 0;
       found |= NewHook(hp, "WillPlus2");
     }
@@ -472,37 +466,37 @@ namespace
         continue;
 
       BYTE byte = *(BYTE *)(addr + 1);
-      regs offset = regs::invalid;
+      int offset = -1;
       switch (byte)
       {
       case 0xf9:
-        offset = regs::ecx;
+        offset = regoffset(ecx);
         break;
       case 0xfa:
-        offset = regs::edx;
+        offset = regoffset(edx);
         break;
       case 0xfb:
-        offset = regs::ebx;
+        offset = regoffset(ebx);
         break;
       case 0xfc:
-        offset = regs::esp;
+        offset = regoffset(esp);
         break;
       case 0xfd:
-        offset = regs::ebp;
+        offset = regoffset(ebp);
         break;
       case 0xfe:
-        offset = regs::esi;
+        offset = regoffset(esi);
         break;
       case 0xff:
-        offset = regs::edi;
+        offset = regoffset(edi);
         break;
       };
-      if (offset != regs::invalid)
+      if (offset != -1)
       {
         HookParam hp;
         hp.address = addr + 8;
         hp.type = CODEC_UTF16;
-        hp.offset = get_reg(offset);
+        hp.offset = offset;
         found |= NewHook(hp, "WillPlus3");
       }
     }
@@ -525,7 +519,7 @@ namespace will3
   int kp = 0;
   int lf = 0;
   int lc = 0;
-  void hookBefore(hook_stack *s, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
+  void hookBefore(hook_context *s, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
   {
     // DOUT(QString::fromUtf16((LPWSTR)s->stack[6]));//"MS UI Gothic"
     // DOUT(QString::fromUtf16((LPWSTR)s->stack[7]));//"���������ˤˤʤꤿ����%K%P"
@@ -553,15 +547,12 @@ namespace will3
       lc = 1;
       str = str.substr(3);
     }
-    std::wregex reg1(L"\\{(.*?):(.*?)\\}");
-    str = std::regex_replace(str, reg1, L"$1");
-
-    std::wregex reg11(L"\\{(.*?);(.*?)\\}");
-    str = std::regex_replace(str, reg11, L"$1");
+    str = std::regex_replace(str, std::wregex(L"\\{(.*?):(.*?)\\}"), L"$1");
+    str = std::regex_replace(str, std::wregex(L"\\{(.*?);(.*?)\\}"), L"$1");
 
     buffer->from(str);
   }
-  void hookafter(hook_stack *s, TextBuffer buffer)
+  void hookafter(hook_context *s, TextBuffer buffer)
   {
     auto data_ = buffer.strW(); // EngineController::instance()->dispatchTextWSTD(innner, Engine::ScenarioRole, 0);
     if (kp)
@@ -597,7 +588,7 @@ bool InsertWillPlus4Hook()
     return false;
   HookParam hp;
   hp.address = addr;
-  hp.offset = get_stack(7);
+  hp.offset = stackoffset(7);
   // hp.filter_fun = WillPlus_extra_filter;
   hp.type = USING_STRING | CODEC_UTF16 | EMBED_ABLE;
   hp.text_fun = will3::hookBefore;
@@ -629,7 +620,7 @@ bool InsertWillPlus5Hook()
   {
     HookParam hp;
     hp.address = addr;
-    hp.offset = get_reg(regs::eax);
+    hp.offset = regoffset(eax);
     hp.type = CODEC_UTF16;
     ConsoleOutput("INSERT WillPlus_extra2");
     ok |= NewHook(hp, "WillPlus_extra2");
@@ -683,7 +674,7 @@ bool insertwillplus6()
   ConsoleOutput("%p %p %p", addr, processStartAddress, processStopAddress);
   HookParam hp;
   hp.address = addr;
-  hp.offset = get_stack(6);
+  hp.offset = stackoffset(6);
   hp.type = CODEC_UTF16 | USING_STRING;
   ConsoleOutput("INSERT WillPlus6");
   return NewHook(hp, "WillPlus6");
@@ -728,7 +719,7 @@ bool willX()
   {
     HookParam hp;
     hp.address = addr;
-    hp.offset = get_reg(regs::esi);
+    hp.offset = regoffset(esi);
     hp.type = NO_CONTEXT | CODEC_ANSI_BE;
     succ |= NewHook(hp, "willAN");
   }
@@ -739,7 +730,7 @@ bool willX()
   {
     HookParam hp;
     hp.address = addr;
-    hp.offset = get_stack(7);
+    hp.offset = stackoffset(7);
     hp.type = USING_STRING;
     succ |= NewHook(hp, "willS");
   }
@@ -799,7 +790,7 @@ namespace
     // typedef TextHookW Self;
 
     template <int idx>
-    void hookBefore(hook_stack *s, HookParam *hp, TextBuffer *buffer, uintptr_t *role)
+    void hookBefore(hook_context *s, HookParam *hp, TextBuffer *buffer, uintptr_t *role)
     {
       auto info = savetyperef.at(idx);
       enum
@@ -817,7 +808,7 @@ namespace
       buffer->from(trimmedText, trimmedSize * 2);
     }
     template <int idx>
-    void hookafter(hook_stack *s, TextBuffer buffer)
+    void hookafter(hook_context *s, TextBuffer buffer)
     {
       auto newText = buffer.strW();
       auto info = savetyperef.at(idx);
@@ -951,7 +942,7 @@ namespace
         0xc7, 0x84, 0x24, 0xe0, 0x01, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00 // 00452b09   c78424 e0010000 07000000      mov dword ptr ss:[esp+0x1e0],0x7
                                                                          // 00452b14   c78424 dc010000 00000000      mov dword ptr ss:[esp+0x1dc],0x0
     };
-    int ecx = get_reg(regs::ecx) / 4;
+    int ecx = regoffset(ecx) / 4;
     return TextHookW::attach<1>(bytes, sizeof(bytes), startAddress, stopAddress, ecx, Engine::ScenarioRole);
   }
 
@@ -1002,7 +993,7 @@ namespace
         0x8b, 0xc7,                                                      // 00455833   8bc7                           mov eax,edi ; jichi: text in eax assigned from edi
         0xc7, 0x84, 0x24, 0xe0, 0x01, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00 // 00455835   c78424 e0010000 07000000       mov dword ptr ss:[esp+0x1e0],0x7 ; jichi: key pattern is here, text i eax
     };
-    int edi = get_reg(regs::edi) / 4;
+    int edi = regoffset(edi) / 4;
     return TextHookW::attach<2>(bytes, sizeof(bytes), startAddress, stopAddress, edi, Engine::ScenarioRole);
   }
   /**
@@ -1071,7 +1062,7 @@ namespace
                                                                          // 00453532   899c24 84000000                 mov dword ptr ss:[esp+0x84],ebx
     };
 
-    int ecx = get_reg(regs::ecx) / 4;
+    int ecx = regoffset(ecx) / 4;
     return TextHookW::attach<3>(bytes, sizeof(bytes), startAddress, stopAddress, ecx, Engine::NameRole);
   }
 
@@ -1138,7 +1129,7 @@ namespace
         0x8d, 0x74, 0x24, 0x4c                    // 00470dca   8d7424 4c                       lea esi,dword ptr ss:[esp+0x4c]
     };
 
-    int edx = get_reg(regs::edx) / 4;
+    int edx = regoffset(edx) / 4;
     return TextHookW::attach<4>(bytes, sizeof(bytes), startAddress, stopAddress, edx, Engine::OtherRole);
   }
 
@@ -1288,7 +1279,7 @@ namespace
           ::strcpy(text, newData.c_str());
         }
       */
-      void hookBefore(hook_stack *s, HookParam *hp, TextBuffer *buffer, uintptr_t *role)
+      void hookBefore(hook_context *s, HookParam *hp, TextBuffer *buffer, uintptr_t *role)
       {
         auto text = (LPSTR)s->eax;
         if (!text)
@@ -1316,7 +1307,7 @@ namespace
         ::strcpy(text, newData.c_str());
         return true;*/
       }
-      void hookafter(hook_stack *s, TextBuffer buffer)
+      void hookafter(hook_context *s, TextBuffer buffer)
       {
 
         auto newData = buffer.strA();
@@ -1596,7 +1587,7 @@ namespace
     namespace Private
     {
 
-      void hookBefore(hook_stack *s, HookParam *hp, TextBuffer *buffer, uintptr_t *role)
+      void hookBefore(hook_context *s, HookParam *hp, TextBuffer *buffer, uintptr_t *role)
       {
         static std::string data_;
         if (s->stack[1] == 3) // skip scenario hook where arg1 is 3
@@ -1626,7 +1617,7 @@ namespace
       hp.address = addr;
       hp.text_fun = Private::hookBefore;
       hp.type = EMBED_ABLE | EMBED_DYNA_SJIS | EMBED_AFTER_OVERWRITE | NO_CONTEXT;
-      hp.offset = get_stack(8);
+      hp.offset = stackoffset(8);
       return NewHook(hp, "EmbedWillplus_other");
     }
 
@@ -1679,23 +1670,24 @@ namespace
         0x85, 0xC9,       // test ecx,ecx
         0x74, 0x04        // je AdvHD.exe+396C6
     };
-    ULONG range = min(processStopAddress - processStartAddress, MAX_REL_ADDR);
-    ULONG addr = MemDbg::findBytes(bytes, sizeof(bytes), processStartAddress, processStartAddress + range);
+    ULONG addr = MemDbg::findBytes(bytes, sizeof(bytes), processStartAddress, processStopAddress);
     if (!addr)
-    {
-      ConsoleOutput("WillPlus5: pattern not found");
       return false;
-    }
-
+    //[241227] [とこはな] エロ漫画お姉ちゃん！！ ～ダメダメな姉との甘々コスプレえっちな日々～
+    addr = addr + 5 + *(int *)(addr + 1);
     HookParam hp = {};
     hp.address = addr;
-    hp.offset = get_reg(regs::esi);
-    hp.index = 0;
-    hp.split = get_reg(regs::ebx);
-    hp.split_index = 0;
-    hp.type = CODEC_UTF16 | USING_STRING | NO_CONTEXT | USING_SPLIT;
-    hp.filter_fun = WillPlus_extra_filter;
-    ConsoleOutput("INSERT WillPlus5");
+    hp.type = CODEC_UTF16 | USING_STRING | USING_SPLIT | EMBED_ABLE;
+    hp.embed_hook_font = F_GetGlyphOutlineW;
+    hp.text_fun = [](hook_context *context, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
+    {
+      buffer->from(((TextUnionW *)context->ecx)->getText());
+      *split = context->ebx;
+    };
+    hp.embed_fun = [](hook_context *context, TextBuffer buffer)
+    {
+      ((TextUnionW *)context->ecx)->setText(buffer.viewW());
+    };
     return NewHook(hp, "WillPlus5");
   }
 
@@ -1738,25 +1730,25 @@ namespace
     switch ((*(BYTE *)(addr + 1)) & 0x7)
     {
     case 0x7:
-      offset = get_reg(regs::edi);
+      offset = regoffset(edi);
       break;
     case 0x6:
-      offset = get_reg(regs::esi);
+      offset = regoffset(esi);
       break;
     case 0x5:
-      offset = get_reg(regs::ebp);
+      offset = regoffset(ebp);
       break;
     case 0x3:
-      offset = get_reg(regs::ebx);
+      offset = regoffset(ebx);
       break;
     case 0x2:
-      offset = get_reg(regs::edx);
+      offset = regoffset(edx);
       break;
     case 0x1:
-      offset = get_reg(regs::ecx);
+      offset = regoffset(ecx);
       break;
     case 0x0:
-      offset = get_reg(regs::eax);
+      offset = regoffset(eax);
       break;
     default:
       return false;
@@ -1796,6 +1788,6 @@ bool Willold::attach_function()
   HookParam hp;
   hp.address = addr;
   hp.type = USING_CHAR | CODEC_ANSI_BE;
-  hp.offset = get_stack(1);
+  hp.offset = stackoffset(1);
   return NewHook(hp, "will");
 }

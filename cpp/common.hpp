@@ -1,27 +1,10 @@
-struct AutoHandle
-{
-    HANDLE _handle;
-    AutoHandle(HANDLE handle) : _handle(handle){};
-    ~AutoHandle()
-    {
-        CloseHandle(_handle);
-    }
-    operator HANDLE()
-    {
-        return _handle;
-    }
-    operator bool()
-    {
-        return _handle == INVALID_HANDLE_VALUE;
-    }
-};
+
 inline SECURITY_ATTRIBUTES allAccess = std::invoke([] // allows non-admin processes to access kernel objects made by admin processes
-{
+                                                   {
 	static SECURITY_DESCRIPTOR sd = {};
 	InitializeSecurityDescriptor(&sd, SECURITY_DESCRIPTOR_REVISION);
 	SetSecurityDescriptorDacl(&sd, TRUE, NULL, FALSE);
-	return SECURITY_ATTRIBUTES{ sizeof(SECURITY_ATTRIBUTES), &sd, FALSE };
-});
+	return SECURITY_ATTRIBUTES{ sizeof(SECURITY_ATTRIBUTES), &sd, FALSE }; });
 
 inline std::wstring StringToWideString(const std::string &text, UINT encoding = CP_UTF8)
 {
@@ -36,3 +19,28 @@ inline std::string WideStringToString(const std::wstring &text, UINT cp = CP_UTF
     WideCharToMultiByte(cp, 0, text.c_str(), -1, buffer.data(), buffer.size(), nullptr, nullptr);
     return buffer.data();
 }
+
+#define CHECK_FAILURE(x) \
+    if (FAILED((x)))     \
+        return (HRESULT)x;
+#define CHECK_FAILURE_NORET(x) \
+    if (FAILED((x)))     \
+        return ;
+
+struct CO_INIT
+{
+    HRESULT hr;
+    CO_INIT()
+    {
+        hr = ::CoInitialize(NULL);
+    }
+    operator HRESULT()
+    {
+        return hr;
+    }
+    ~CO_INIT()
+    {
+        if (SUCCEEDED(hr))
+            CoUninitialize();
+    }
+};

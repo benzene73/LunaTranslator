@@ -11,6 +11,7 @@ from gui.usefulwidget import (
     makescrollgrid,
     D_getsimpleswitch,
 )
+from gui.setting_about import offlinelinks
 
 
 def makescalew(self, lay: QVBoxLayout):
@@ -229,6 +230,13 @@ def makescalew(self, lay: QVBoxLayout):
                                 ),
                             ],
                             [
+                                "内联效果参数",
+                                D_getsimpleswitch(
+                                    magpie_config,
+                                    "inlineParams",
+                                ),
+                            ],
+                            [
                                 "缩放时模拟独占全屏",
                                 D_getsimpleswitch(
                                     magpie_config,
@@ -236,10 +244,12 @@ def makescalew(self, lay: QVBoxLayout):
                                 ),
                             ],
                             [
-                                "内联效果参数",
-                                D_getsimpleswitch(
+                                "最小帧率",
+                                D_getsimplecombobox(
+                                    ["0", "5", "10", "20", "30"],
                                     magpie_config,
-                                    "inlineParams",
+                                    "minFrameRate",
+                                    internal=[0, 5, 10, 20, 30],
                                 ),
                             ],
                         ]
@@ -333,6 +343,7 @@ def makescalew(self, lay: QVBoxLayout):
             ),
             ("", 10),
         ],
+        [(functools.partial(offlinelinks, "magpie"), 0)],
     ]
 
     commonfsgrid = [

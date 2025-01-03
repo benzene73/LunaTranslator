@@ -16,6 +16,105 @@ MWebBrowser::Create(HWND hwndParent)
     }
     return pBrowser;
 }
+void JSObject::bindfunction(const std::wstring &funcname, functiontype function)
+{
+    auto curr = DISPID_VALUE + 1 + funcnames.size();
+    funcnames[funcname] = curr;
+    funcmap[curr] = function;
+}
+HRESULT STDMETHODCALLTYPE JSObject::QueryInterface(REFIID riid, void **ppv)
+{
+    *ppv = NULL;
+
+    if (riid == IID_IUnknown || riid == IID_IDispatch)
+    {
+        *ppv = static_cast<IDispatch *>(this);
+    }
+
+    if (*ppv != NULL)
+    {
+        AddRef();
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
+}
+
+ULONG STDMETHODCALLTYPE JSObject::AddRef()
+{
+    return InterlockedIncrement(&ref);
+}
+
+ULONG STDMETHODCALLTYPE JSObject::Release()
+{
+    int tmp = InterlockedDecrement(&ref);
+
+    if (tmp == 0)
+    {
+        // OutputDebugString("JSObject::Release(): delete this");
+        delete this;
+    }
+
+    return tmp;
+}
+
+HRESULT STDMETHODCALLTYPE JSObject::GetTypeInfoCount(UINT *pctinfo)
+{
+    *pctinfo = 0;
+
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE JSObject::GetTypeInfo(UINT iTInfo, LCID lcid,
+                                                ITypeInfo **ppTInfo)
+{
+    return E_FAIL;
+}
+
+HRESULT STDMETHODCALLTYPE JSObject::GetIDsOfNames(REFIID riid,
+                                                  LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
+{
+    HRESULT hr = S_OK;
+
+    for (UINT i = 0; i < cNames; i++)
+    {
+        auto iter = funcnames.find(rgszNames[i]);
+        if (iter != funcnames.end())
+        {
+            rgDispId[i] = iter->second;
+        }
+        else
+        {
+            rgDispId[i] = DISPID_UNKNOWN;
+            hr = DISP_E_UNKNOWNNAME;
+        }
+    }
+
+    return hr;
+}
+
+// https://github.com/Tobbe/CppIEEmbed
+HRESULT STDMETHODCALLTYPE JSObject::Invoke(DISPID dispIdMember, REFIID riid,
+                                           LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult,
+                                           EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    if (wFlags & DISPATCH_METHOD)
+    {
+        HRESULT hr = S_OK;
+        std::vector<BSTR> args;
+        for (size_t i = 0; i < pDispParams->cArgs; ++i)
+        {
+            BSTR bstrArg = pDispParams->rgvarg[i].bstrVal;
+            args.push_back(bstrArg);
+        }
+        if (funcmap.find(dispIdMember) == funcmap.end())
+            return DISP_E_MEMBERNOTFOUND;
+        funcmap[dispIdMember](args.data(), args.size());
+        return S_OK;
+    }
+
+    return E_FAIL;
+}
 
 MWebBrowser::MWebBrowser(HWND hwndParent) : m_nRefCount(0),
                                             m_hwndParent(NULL),
@@ -34,14 +133,14 @@ MWebBrowser::MWebBrowser(HWND hwndParent) : m_nRefCount(0),
     m_hr = CreateBrowser(hwndParent);
 
     htmlSource = L"";
-    IConnectionPointContainer* container = nullptr;
-    m_web_browser2->QueryInterface(IID_IConnectionPointContainer, (void**)&container);
+    CComPtr<IConnectionPointContainer> container = nullptr;
+    m_web_browser2.QueryInterface(&container);
     container->FindConnectionPoint(__uuidof(DWebBrowserEvents2), &callback);
-    IUnknown* punk = nullptr;
-    QueryInterface(IID_IUnknown, (void**)&punk);
+    CComPtr<IUnknown> punk = nullptr;
+    QueryInterface(IID_IUnknown, (void **)&punk);
     callback->Advise(punk, &eventCookie);
-    punk->Release();
-    container->Release();
+    jsobj = new JSObject();
+    jsobj->AddRef();
 }
 
 BOOL MWebBrowser::IsCreated() const
@@ -51,25 +150,11 @@ BOOL MWebBrowser::IsCreated() const
 
 MWebBrowser::~MWebBrowser()
 {
-    if (m_pDocHostUIHandler)
+    if (jsobj)
     {
-        m_pDocHostUIHandler->Release();
-        m_pDocHostUIHandler = NULL;
-    }
-    if (m_ole_object)
-    {
-        m_ole_object->Release();
-        m_ole_object = NULL;
-    }
-    if (m_ole_inplace_object)
-    {
-        m_ole_inplace_object->Release();
-        m_ole_inplace_object = NULL;
-    }
-    if (m_web_browser2)
-    {
-        m_web_browser2->Release();
-        m_web_browser2 = NULL;
+        jsobj->Release();
+        delete jsobj;
+        jsobj = NULL;
     }
 }
 
@@ -78,15 +163,9 @@ IWebBrowser2 *MWebBrowser::GetIWebBrowser2()
     return m_web_browser2;
 }
 
-IHTMLDocument2 *MWebBrowser::GetIHTMLDocument2()
+HRESULT MWebBrowser::GetIHTMLDocument2(IHTMLDocument2 **p)
 {
-    IDispatch *pDisp;
-    m_web_browser2->get_Document(&pDisp);
-    if (pDisp)
-    {
-        return static_cast<IHTMLDocument2 *>(pDisp);
-    }
-    return NULL;
+    return m_web_browser2->get_Document((IDispatch **)p);
 }
 
 HWND MWebBrowser::GetControlWindow()
@@ -126,53 +205,19 @@ HRESULT MWebBrowser::CreateBrowser(HWND hwndParent)
 {
     m_hwndParent = hwndParent;
 
-    HRESULT hr;
-    hr = ::OleCreate(CLSID_WebBrowser, IID_IOleObject, OLERENDER_DRAW, NULL,
-                     this, this, (void **)&m_ole_object);
-    if (FAILED(hr))
-    {
-        assert(0);
-        return hr;
-    }
+    CHECK_FAILURE(OleCreate(CLSID_WebBrowser, IID_IOleObject, OLERENDER_DRAW, NULL,
+                            this, this, (void **)&m_ole_object));
 
-    if (m_pDocHostUIHandler)
-    {
-        m_pDocHostUIHandler->Release();
-        m_pDocHostUIHandler = NULL;
-    }
-    m_ole_object->QueryInterface(&m_pDocHostUIHandler);
+    m_ole_object.QueryInterface(&m_pDocHostUIHandler);
 
-    hr = m_ole_object->SetClientSite(this);
-    if (FAILED(hr))
-    {
-        assert(0);
-        return hr;
-    }
-
-    hr = ::OleSetContainedObject(m_ole_object, TRUE);
-    if (FAILED(hr))
-    {
-        assert(0);
-        return hr;
-    }
-
+    CHECK_FAILURE(m_ole_object->SetClientSite(this));
+    CHECK_FAILURE(OleSetContainedObject(m_ole_object, TRUE));
     RECT rc;
     ::SetRectEmpty(&rc);
-    hr = m_ole_object->DoVerb(OLEIVERB_INPLACEACTIVATE, NULL, this, 0,
-                              m_hwndParent, &rc);
-    if (FAILED(hr))
-    {
-        assert(0);
-        return hr;
-    }
+    CHECK_FAILURE(m_ole_object->DoVerb(OLEIVERB_INPLACEACTIVATE, NULL, this, 0,
+                                       m_hwndParent, &rc));
 
-    hr = m_ole_object->QueryInterface(&m_web_browser2);
-    if (FAILED(hr))
-    {
-        assert(0);
-        return hr;
-    }
-
+    CHECK_FAILURE(m_ole_object.QueryInterface(&m_web_browser2));
     HWND hwnd = GetControlWindow();
 
     DWORD exstyle = GetWindowLong(hwnd, GWL_EXSTYLE);
@@ -254,19 +299,17 @@ void MWebBrowser::StopDownload()
     if (!m_web_browser2)
         return;
 
-    IDispatch *pDisp;
+    CComPtr<IDispatch> pDisp;
     m_web_browser2->get_Document(&pDisp);
     if (pDisp)
     {
-        IOleCommandTarget *pCmdTarget = NULL;
-        pDisp->QueryInterface(&pCmdTarget);
+        CComPtr<IOleCommandTarget> pCmdTarget = NULL;
+        pDisp.QueryInterface(&pCmdTarget);
         if (pCmdTarget)
         {
             OLECMDEXECOPT option = OLECMDEXECOPT_DONTPROMPTUSER;
             pCmdTarget->Exec(NULL, OLECMDID_STOPDOWNLOAD, option, NULL, NULL);
-            pCmdTarget->Release();
         }
-        pDisp->Release();
     }
 }
 
@@ -323,12 +366,12 @@ void MWebBrowser::Print(BOOL bBang)
     if (!m_web_browser2)
         return;
 
-    IDispatch *pDisp;
+    CComPtr<IDispatch> pDisp;
     m_web_browser2->get_Document(&pDisp);
     if (pDisp)
     {
-        IOleCommandTarget *pCmdTarget = NULL;
-        pDisp->QueryInterface(&pCmdTarget);
+        CComPtr<IOleCommandTarget> pCmdTarget = NULL;
+        pDisp.QueryInterface(&pCmdTarget);
         if (pCmdTarget)
         {
             OLECMDEXECOPT option;
@@ -337,9 +380,7 @@ void MWebBrowser::Print(BOOL bBang)
             else
                 option = OLECMDEXECOPT_PROMPTUSER;
             pCmdTarget->Exec(NULL, OLECMDID_PRINT, option, NULL, NULL);
-            pCmdTarget->Release();
         }
-        pDisp->Release();
     }
 }
 
@@ -348,19 +389,17 @@ void MWebBrowser::PrintPreview()
     if (!m_web_browser2)
         return;
 
-    IDispatch *pDisp;
+    CComPtr<IDispatch> pDisp;
     m_web_browser2->get_Document(&pDisp);
     if (pDisp)
     {
-        IOleCommandTarget *pCmdTarget = NULL;
-        pDisp->QueryInterface(&pCmdTarget);
+        CComPtr<IOleCommandTarget> pCmdTarget = NULL;
+        pDisp.QueryInterface(&pCmdTarget);
         if (pCmdTarget)
         {
             OLECMDEXECOPT option = OLECMDEXECOPT_DONTPROMPTUSER;
             pCmdTarget->Exec(NULL, OLECMDID_PRINTPREVIEW, option, NULL, NULL);
-            pCmdTarget->Release();
         }
-        pDisp->Release();
     }
 }
 
@@ -369,19 +408,17 @@ void MWebBrowser::PageSetup()
     if (!m_web_browser2)
         return;
 
-    IDispatch *pDisp;
+    CComPtr<IDispatch> pDisp;
     m_web_browser2->get_Document(&pDisp);
     if (pDisp)
     {
-        IOleCommandTarget *pCmdTarget = NULL;
-        pDisp->QueryInterface(&pCmdTarget);
+        CComPtr<IOleCommandTarget> pCmdTarget;
+        pDisp.QueryInterface(&pCmdTarget);
         if (pCmdTarget)
         {
             OLECMDEXECOPT option = OLECMDEXECOPT_DONTPROMPTUSER;
             pCmdTarget->Exec(NULL, OLECMDID_PAGESETUP, option, NULL, NULL);
-            pCmdTarget->Release();
         }
-        pDisp->Release();
     }
 }
 
@@ -390,12 +427,11 @@ BOOL MWebBrowser::TranslateAccelerator(LPMSG pMsg)
     if (!m_web_browser2)
         return FALSE;
 
-    IOleInPlaceActiveObject *pOIPAO = NULL;
-    HRESULT hr = m_web_browser2->QueryInterface(&pOIPAO);
+    CComPtr<IOleInPlaceActiveObject> pOIPAO = NULL;
+    HRESULT hr = m_web_browser2.QueryInterface(&pOIPAO);
     if (SUCCEEDED(hr))
     {
         hr = pOIPAO->TranslateAccelerator(pMsg);
-        pOIPAO->Release();
         return hr == S_OK;
     }
     return FALSE;
@@ -410,27 +446,6 @@ HRESULT MWebBrowser::get_LocationURL(BSTR *bstrURL) const
     }
 
     return m_web_browser2->get_LocationURL(bstrURL);
-}
-
-HRESULT MWebBrowser::get_mimeType(BSTR *bstrMIME) const
-{
-    if (!m_web_browser2)
-    {
-        *bstrMIME = NULL;
-        return E_FAIL;
-    }
-
-    HRESULT hr = E_FAIL;
-    IDispatch *pDisp;
-    m_web_browser2->get_Document(&pDisp);
-    if (pDisp)
-    {
-        IHTMLDocument2 *pDocument = static_cast<IHTMLDocument2 *>(pDisp);
-        hr = pDocument->get_mimeType(bstrMIME);
-        pDisp->Release();
-    }
-
-    return hr;
 }
 
 BOOL MWebBrowser::is_busy() const
@@ -597,7 +612,7 @@ STDMETHODIMP MWebBrowser::CanInPlaceActivate()
 STDMETHODIMP MWebBrowser::OnInPlaceActivate()
 {
     ::OleLockRunning(m_ole_object, TRUE, FALSE);
-    m_ole_object->QueryInterface(&m_ole_inplace_object);
+    m_ole_object.QueryInterface(&m_ole_inplace_object);
     m_ole_inplace_object->SetObjectRects(&m_rc, &m_rc);
     return S_OK;
 }
@@ -850,24 +865,7 @@ STDMETHODIMP MWebBrowser::GetWindow(REFGUID rguidReason, HWND *phwnd)
 
 STDMETHODIMP MWebBrowser::OnSecurityProblem(DWORD dwProblem)
 {
-    printf("MWebBrowser::OnSecurityProblem\n");
-
-    BSTR url = NULL;
-    get_LocationURL(&url);
-    if (url)
-    {
-        SysFreeString(url);
-    }
-
-    {
-        return S_OK;
-    }
-
-    {
-        return S_OK;
-    }
-
-    return E_ABORT;
+    return S_OK;
 }
 
 // IDocHostUIHandler interface
@@ -998,55 +996,84 @@ HRESULT MWebBrowser::GetTypeInfoCount(UINT *pctinfo) { return E_FAIL; }
 HRESULT MWebBrowser::GetTypeInfo(UINT, LCID, ITypeInfo **) { return E_FAIL; }
 HRESULT MWebBrowser::GetIDsOfNames(REFIID riid, LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId) { return E_FAIL; }
 
+HRESULT MWebBrowser::AddCustomObject(IDispatch *custObj, std::wstring name)
+{
+    CComPtr<IHTMLDocument2> doc;
+    CHECK_FAILURE(GetIHTMLDocument2(&doc));
+
+    CComPtr<IHTMLWindow2> win = NULL;
+    CHECK_FAILURE(doc->get_parentWindow(&win));
+
+    CComPtr<IDispatchEx> winEx;
+    CHECK_FAILURE(win.QueryInterface(&winEx));
+
+    DISPID dispid;
+    CComBSTR bname = name.c_str();
+    CHECK_FAILURE(winEx->GetDispID(bname, fdexNameEnsure, &dispid));
+
+    DISPID namedArgs[] = {DISPID_PROPERTYPUT};
+    DISPPARAMS params;
+    params.rgvarg = new VARIANT[1];
+    params.rgvarg[0].pdispVal = custObj;
+    params.rgvarg[0].vt = VT_DISPATCH;
+    params.rgdispidNamedArgs = namedArgs;
+    params.cArgs = 1;
+    params.cNamedArgs = 1;
+
+    return winEx->InvokeEx(dispid, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYPUT, &params, NULL, NULL, NULL);
+}
 HRESULT MWebBrowser::Invoke(DISPID dispIdMember, REFIID, LCID, WORD,
                             DISPPARAMS *pDispParams, VARIANT *pVarResult,
                             EXCEPINFO *, UINT *)
 {
     if (dispIdMember == DISPID_DOCUMENTCOMPLETE)
         return OnCompleted(pDispParams);
-    else
-        return S_OK;
+    else if (dispIdMember == DISPID_NAVIGATECOMPLETE2)
+        return AddCustomObject(jsobj, L"LUNAJSObject"), S_OK;
+    return S_OK;
 }
-HRESULT MWebBrowser::OnCompleted(DISPPARAMS* args) {
-    HRESULT                   hr;
+HRESULT MWebBrowser::OnCompleted(DISPPARAMS *args)
+{
+    HRESULT hr;
 
-    IDispatch                 *pDispatch = 0;
-    IHTMLDocument2            *pHtmlDoc2 = 0;
-    IPersistStreamInit        *pPSI = 0;
-    IStream                   *pStream = 0;
-    HGLOBAL                   hHTMLContent;
+    CComPtr<IDispatch> pDispatch;
+    CComPtr<IHTMLDocument2> pHtmlDoc2 = 0;
+    CComPtr<IPersistStreamInit> pPSI = 0;
+    CComPtr<IStream> pStream = 0;
+    HGLOBAL hHTMLContent;
 
-
-    if (htmlSource.empty()) return S_OK;
+    if (htmlSource.empty())
+        return S_OK;
     hr = m_web_browser2->get_Document(&pDispatch);
-    if (SUCCEEDED(hr) && pDispatch) hr = pDispatch->QueryInterface(IID_IHTMLDocument2, (void **)&pHtmlDoc2);
-    if (SUCCEEDED(hr) && pHtmlDoc2) hr = pHtmlDoc2->QueryInterface(IID_IPersistStreamInit, (void **)&pPSI);
-
+    if (SUCCEEDED(hr) && pDispatch)
+        hr = pDispatch.QueryInterface(&pHtmlDoc2);
+    if (SUCCEEDED(hr) && pHtmlDoc2)
+        hr = pHtmlDoc2.QueryInterface(&pPSI);
 
     // allocate global memory to copy the HTML content to
     hHTMLContent = ::GlobalAlloc(GMEM_MOVEABLE, (htmlSource.size() + 1) * sizeof(TCHAR));
     if (hHTMLContent)
     {
-        wchar_t * p_content(static_cast<wchar_t *>(GlobalLock(hHTMLContent)));
+        wchar_t *p_content(static_cast<wchar_t *>(GlobalLock(hHTMLContent)));
         ::wcscpy(p_content, htmlSource.c_str());
         GlobalUnlock(hHTMLContent);
 
         // create a stream object based on the HTML content
-        if (SUCCEEDED(hr) && pPSI) hr = ::CreateStreamOnHGlobal(hHTMLContent, TRUE, &pStream);
+        if (SUCCEEDED(hr) && pPSI)
+            hr = ::CreateStreamOnHGlobal(hHTMLContent, TRUE, &pStream);
 
-        if (SUCCEEDED(hr) && pStream) hr = pPSI->InitNew();
-        if (SUCCEEDED(hr)) hr = pPSI->Load(pStream);
+        if (SUCCEEDED(hr) && pStream)
+            hr = pPSI->InitNew();
+        if (SUCCEEDED(hr))
+            hr = pPSI->Load(pStream);
     }
-    if (pStream) pStream->Release();
-    if (pPSI) pPSI->Release();
-    if (pHtmlDoc2) pHtmlDoc2->Release();
-    if (pDispatch) pDispatch->Release();
-    htmlSource=L"";
+    htmlSource = L"";
     return S_OK;
 }
 
-HRESULT MWebBrowser::SetHtml(const wchar_t* html){
-    htmlSource=html;
+HRESULT MWebBrowser::SetHtml(const wchar_t *html)
+{
+    htmlSource = html;
     Navigate(L"about:blank");
     return S_OK;
 }

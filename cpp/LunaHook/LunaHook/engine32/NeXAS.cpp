@@ -278,9 +278,9 @@ bool InsertNeXASHookA()
     {
       HookParam hp;
       hp.address = addr2;
-      hp.text_fun = [](hook_stack *stack, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
+      hp.text_fun = [](hook_context *context, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
       {
-        auto v1 = stack->ecx;
+        auto v1 = context->ecx;
         const unsigned __int8 *v9;
         if (*(DWORD *)(v1 + 288) < 0x10u)
           v9 = (const unsigned __int8 *)(v1 + 268);
@@ -308,7 +308,7 @@ bool InsertNeXASHookA()
   {
     HookParam hp;
     hp.address = addrx + sizeof(sig2) - 5;
-    hp.offset = get_reg(regs::eax);
+    hp.offset = regoffset(eax);
     hp.type = USING_STRING;
     hp.lineSeparator = L"@n";
     hp.filter_fun = [](TextBuffer *buffer, HookParam *)
@@ -339,10 +339,10 @@ bool InsertNeXASHookA()
   hp.address = addr;
   // hp.type = USING_STRING|USING_SPLIT;
   hp.type = CODEC_ANSI_BE | NO_CONTEXT | USING_SPLIT;
-  hp.offset = get_stack(1);
+  hp.offset = stackoffset(1);
 
   // Either lpgm or lpmat2 are good choices
-  hp.split = get_stack(3);
+  hp.split = stackoffset(3);
   // hp.split = arg7_lpmat2; // = 0x18, arg7
 
   ConsoleOutput("INSERT NeXAS");
@@ -379,7 +379,7 @@ bool InsertNeXASHookW()
     hp.address = addr;
     hp.type = USING_STRING | CODEC_UTF8; // utf8编码的单字符
     hp.user_value = (DWORD) new nexassomeinfo{*(DWORD *)(addrx + 2), *(DWORD *)(addrx + 9), 0};
-    hp.text_fun = [](hook_stack *stack, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
+    hp.text_fun = [](hook_context *context, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
     {
       /*
        v17 = *(_DWORD *)(this + 188) < 0x10u;
@@ -389,7 +389,7 @@ bool InsertNeXASHookW()
       v18 = *(const CHAR **)(this + 168);
     sub_42A120(v34, v18, *(_DWORD *)(this + 184));//utf8转utf16
       */
-      auto v1 = stack->ecx;
+      auto v1 = context->ecx;
       const unsigned __int8 *v9;
       auto off1 = ((nexassomeinfo *)hp->user_value)->off1; // 188,0xbc
       auto off2 = ((nexassomeinfo *)hp->user_value)->off2; // 168,0xa8
@@ -400,8 +400,8 @@ bool InsertNeXASHookW()
 
       buffer->from((char *)v9);
       if (((nexassomeinfo *)hp->user_value)->split == 0)
-        ((nexassomeinfo *)hp->user_value)->split = stack->stack[1];
-      *split = std::abs((long long)((nexassomeinfo *)hp->user_value)->split - (long long)stack->stack[1]) < 0x10;
+        ((nexassomeinfo *)hp->user_value)->split = context->stack[1];
+      *split = std::abs((long long)((nexassomeinfo *)hp->user_value)->split - (long long)context->stack[1]) < 0x10;
       // 文本会被分成两个线程，原因未知。人名线程是比文本小很多的，两个文本线程离得很近
       // 不能不分，不分会导致沾到一起。
     };
@@ -427,7 +427,7 @@ namespace
     hp.address = addr + 9;
     hp.type = DATA_INDIRECT;
     hp.index = 0;
-    hp.offset = get_reg(regs::ecx);
+    hp.offset = regoffset(ecx);
     hp.filter_fun = [](TextBuffer *buffer, HookParam *)
     {
       auto text = reinterpret_cast<LPSTR>(buffer->buff);
@@ -461,9 +461,9 @@ namespace
     HookParam hp;
     hp.address = addr;
     hp.type = USING_STRING;
-    hp.text_fun = [](hook_stack *stack, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
+    hp.text_fun = [](hook_context *context, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
     {
-      auto a2 = (TextUnionA *)stack->stack[1]; // std::string*
+      auto a2 = (TextUnionA *)context->stack[1]; // std::string*
       buffer->from(a2->getText());
     };
     hp.filter_fun = [](TextBuffer *buffer, HookParam *hp)
@@ -487,9 +487,51 @@ namespace
     return NewHook(hp, "NeXAS3");
   }
 }
-
+namespace
+{
+  //[241219][1299663][エンターグラム] この青空に約束を― Refine
+  bool b4()
+  {
+    BYTE bs[] = {
+        0x8b, 0x45, XX,
+        0x3b, 0xd0,
+        0x0f, 0x84, XX4,
+        0x83, 0x78, 0x14, 0x0f,
+        0x8b, 0x48, 0x10,
+        0x76, 0x02,
+        0x8b, 0x00};
+    auto aV = MemDbg::findBytes(bs, sizeof(bs), processStartAddress, processStopAddress);
+    if (!aV)
+      return false;
+    HookParam hp;
+    hp.address = aV + 3;
+    hp.type = USING_STRING | CODEC_UTF8 | NO_CONTEXT;
+    hp.text_fun = [](hook_context *context, HookParam *hp, TextBuffer *buffer, uintptr_t *split)
+    {
+      auto _ = (TextUnionA *)context->eax;
+      buffer->from(_->getText(), _->size);
+    };
+    hp.filter_fun = [](TextBuffer *buffer, HookParam *hp)
+    {
+      auto s = buffer->strA();
+      s = std::regex_replace(s, std::regex(R"(@v[_\w\d]{8})"), "");
+      s = std::regex_replace(s, std::regex(R"(@t\d{4})"), "");
+      s = std::regex_replace(s, std::regex(R"(@s\d{4})"), "");
+      s = std::regex_replace(s, std::regex(R"(@m\d{2})"), "");
+      s = std::regex_replace(s, std::regex(R"(@f\d{2})"), "");
+      s = std::regex_replace(s, std::regex(R"(@h[_\d\w]+)"), "");
+      s = std::regex_replace(s, std::regex(R"(@r(.*?)@(.*?)@)"), "$1");
+      strReplace(s, "@n", "");
+      strReplace(s, "@e", "");
+      strReplace(s, "@k", "");
+      strReplace(s, "@p", "");
+      buffer->from(s);
+    };
+    return NewHook(hp, "NeXAS4");
+  }
+}
 bool NeXAS::attach_function()
 {
-  auto _ = _2() || _3();
+  auto _ = _2() || _3() || b4();
   return InsertNeXASHookA() || InsertNeXASHookW() || _;
 }

@@ -7,22 +7,25 @@ from myutils.utils import get_element_by, simplehtmlparser_all
 
 class jisho(cishubase):
 
+    def init(self):
+        self.style = {}
+
     def generatehtml_tabswitch(self, allres):
         btns = []
         contents = []
         idx = 0
         for title, res in allres:
-            idx += 1
             btns.append(
-                """<button type="button" onclick="onclickbtn_xxxxxx_internal('buttonid_xxxxx_internal{idx}')" id="buttonid_xxxxx_internal{idx}" class="tab-button_xxxx_internal" data-tab="tab_xxxxx_internal{idx}">{title}</button>""".format(
-                    idx=idx, title=title
+                """<button type="button" onclick="onclickbtn_xxxxxx_internal('buttonid_xxxxx_internal{idx}')" id="buttonid_xxxxx_internal{idx}" class="tab-button_xxxx_internal{klass}" data-tab="tab_xxxxx_internal{idx}">{title}</button>""".format(
+                    idx=idx, title=title, klass="" if idx != 0 else " active"
                 )
             )
             contents.append(
-                """<div id="tab_xxxxx_internal{idx}" class="tab-pane_xxxxx_internal">{res}</div>""".format(
-                    idx=idx, res=res
+                """<div id="tab_xxxxx_internal{idx}" class="tab-pane_xxxxx_internal{klass}">{res}</div>""".format(
+                    idx=idx, res=res, klass="" if idx != 0 else " active"
                 )
             )
+            idx += 1
         commonstyle = """
 <script>
 function onclickbtn_xxxxxx_internal(_id) {
@@ -85,10 +88,6 @@ function onclickbtn_xxxxxx_internal(_id) {
         </div>
     </div>
 </div>
-<script>
-if(document.querySelectorAll('.tab-widget_xxxxxx_internal .tab-button_xxxx_internal').length)
-document.querySelectorAll('.tab-widget_xxxxxx_internal .tab-button_xxxx_internal')[0].click()
-</script>
 """.format(
             commonstyle=commonstyle, btns="".join(btns), contents="".join(contents)
         )
@@ -131,8 +130,10 @@ document.querySelectorAll('.tab-widget_xxxxxx_internal .tab-button_xxxx_internal
             ss = re.search(
                 'href="https://assets.jisho.org/assets/application(.*)"', html
             )
-            stl = requests.get(ss.group()[6:-1], proxies=self.proxy).text
-            saver["style"] = stl
+            link = ss.group()[6:-1]
+            if not self.style.get(link):
+                self.style[link] = requests.get(link, proxies=self.proxy).text
+            saver["style"] = self.style[link]
             saver["primary"] = get_element_by("id", "result_area", res) + res.replace(
                 get_element_by("id", "main_results", res),
                 get_element_by("id", "primary", res),
@@ -162,6 +163,7 @@ document.querySelectorAll('.tab-widget_xxxxxx_internal .tab-button_xxxx_internal
             res.append(("Others", saver["secondary"]))
         if not res:
             return
-        return "<style>{}</style>".format(
-            saver.get("style", "")
-        ) + self.generatehtml_tabswitch(res)
+        style, klass = self.parse_stylesheet(saver.get("style", ""))
+        return '<style>{}</style><div class="{}">{}</div>'.format(
+            style, klass, self.generatehtml_tabswitch(res)
+        )

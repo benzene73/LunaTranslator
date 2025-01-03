@@ -26,9 +26,8 @@ inline SECURITY_ATTRIBUTES allAccess = std::invoke([] // allows non-admin proces
 	SetSecurityDescriptorDacl(&sd, TRUE, NULL, FALSE);
 	return SECURITY_ATTRIBUTES{ sizeof(SECURITY_ATTRIBUTES), &sd, FALSE }; });
 
-struct hook_stack
+struct hook_context
 {
-
 #ifndef _WIN64
 	uintptr_t _eflags; // pushfd
 	uintptr_t edi,	   // pushad
@@ -65,16 +64,114 @@ struct hook_stack
 		uintptr_t retaddr;
 		BYTE base[1];
 	};
-	uintptr_t get_base()
+	void toPCONTEXT(PCONTEXT pcontext)
 	{
-		return (uintptr_t)this + sizeof(hook_stack) - sizeof(uintptr_t);
+#ifndef _WIN64
+		pcontext->Eax = eax;
+		pcontext->Ecx = ecx;
+		pcontext->Edx = edx;
+		pcontext->Ebx = ebx;
+		pcontext->Esp = esp;
+		pcontext->Ebp = ebp;
+		pcontext->Esi = esi;
+		pcontext->Edi = edi;
+		pcontext->EFlags = eflags;
+#else
+		pcontext->Rax = rax;
+		pcontext->Rbx = rbx;
+		pcontext->Rcx = rcx;
+		pcontext->Rdx = rdx;
+		pcontext->Rsp = rsp;
+		pcontext->Rbp = rbp;
+		pcontext->Rsi = rsi;
+		pcontext->Rdi = rdi;
+		pcontext->R8 = r8;
+		pcontext->R9 = r9;
+		pcontext->R10 = r10;
+		pcontext->R11 = r11;
+		pcontext->R12 = r12;
+		pcontext->R13 = r13;
+		pcontext->R14 = r14;
+		pcontext->R15 = r15;
+		pcontext->EFlags = eflags;
+#endif
+	}
+	static hook_context fromPCONTEXT(PCONTEXT pcontext)
+	{
+		hook_context context;
+#ifndef _WIN64
+		context.eax = pcontext->Eax;
+		context.ecx = pcontext->Ecx;
+		context.edx = pcontext->Edx;
+		context.ebx = pcontext->Ebx;
+		context.esp = pcontext->Esp;
+		context.ebp = pcontext->Ebp;
+		context.esi = pcontext->Esi;
+		context.edi = pcontext->Edi;
+		context.eflags = pcontext->EFlags;
+		context.retaddr = *(DWORD *)pcontext->Esp;
+#else
+		context.rax = pcontext->Rax;
+		context.rbx = pcontext->Rbx;
+		context.rcx = pcontext->Rcx;
+		context.rdx = pcontext->Rdx;
+		context.rsp = pcontext->Rsp;
+		context.rbp = pcontext->Rbp;
+		context.rsi = pcontext->Rsi;
+		context.rdi = pcontext->Rdi;
+		context.r8 = pcontext->R8;
+		context.r9 = pcontext->R9;
+		context.r10 = pcontext->R10;
+		context.r11 = pcontext->R11;
+		context.r12 = pcontext->R12;
+		context.r13 = pcontext->R13;
+		context.r14 = pcontext->R14;
+		context.r15 = pcontext->R15;
+		context.eflags = pcontext->EFlags;
+		context.retaddr = *(DWORD64 *)pcontext->Rsp;
+#endif
+		return context;
+	}
+	static hook_context *fromBase(uintptr_t lpDataBase)
+	{
+		return (hook_context *)(lpDataBase - offsetof(hook_context, base));
+	}
+	constexpr uintptr_t &argof(int idx)
+	{
+#ifdef _WIN64
+		auto offset = 0;
+		switch (idx)
+		{
+		case 1:
+			return rcx;
+		case 2:
+			return rdx;
+		case 3:
+			return r8;
+		case 4:
+			return r9;
+		default:
+			return stack[idx];
+		}
+#else
+		return stack[idx];
+#endif
 	}
 };
+#define ___baseoffset (int)offsetof(hook_context, base)
+#define regoffset(reg) ((int)offsetof(hook_context, reg) - ___baseoffset)
+#define stackoffset(idx) ((int)offsetof(hook_context, stack[idx]) - ___baseoffset)
+#define GETARG(i) (((int)(size_t) & reinterpret_cast<char const volatile &>((((hook_context *)0)->argof(i)))) - ___baseoffset)
+#ifndef _WIN64
+#define THISCALLARG1 stack[1]
+#define LASTRETVAL eax
+#define THISCALLTHIS ecx
+#else
+#define THISCALLARG1 rdx
+#define LASTRETVAL rax
+#define THISCALLTHIS rcx
+#endif
 
-inline hook_stack *get_hook_stack(uintptr_t lpDataBase)
-{
-	return (hook_stack *)(lpDataBase - sizeof(hook_stack) + sizeof(uintptr_t));
-}
 // jichi 3/7/2014: Add guessed comment
 
 #define ALIGNPTR(Y, X) \
@@ -111,9 +208,9 @@ struct HookParam
 	short length_offset;					   // index of the string length
 	ALIGNPTR(uint64_t __1, uintptr_t padding); // padding before string
 	ALIGNPTR(uint64_t __12, uintptr_t user_value);
-	ALIGNPTR(uint64_t __2, void (*text_fun)(hook_stack *stack, HookParam *hp, TextBuffer *buffer, uintptr_t *split))
+	ALIGNPTR(uint64_t __2, void (*text_fun)(hook_context *context, HookParam *hp, TextBuffer *buffer, uintptr_t *split))
 	ALIGNPTR(uint64_t __3, void (*filter_fun)(TextBuffer *buffer, HookParam *hp)); // jichi 10/24/2014: Add filter function. Return false to skip the text
-	ALIGNPTR(uint64_t __7, void (*embed_fun)(hook_stack *stack, TextBuffer buffer));
+	ALIGNPTR(uint64_t __7, void (*embed_fun)(hook_context *context, TextBuffer buffer));
 	uint64_t embed_hook_font;
 	ALIGNPTR(uint64_t __9, const wchar_t *lineSeparator);
 	char name[HOOK_NAME_SIZE];
@@ -123,9 +220,7 @@ struct HookParam
 		ZeroMemory(this, sizeof(HookParam));
 	}
 	uint64_t emu_addr;
-	int argidx;
 	JITTYPE jittype;
-	char unityfunctioninfo[1024];
 };
 
 struct ThreadParam
@@ -157,33 +252,27 @@ struct SearchParam
 	wchar_t text[PATTERN_SIZE] = {};			  // text to search for
 	bool isjithook;
 };
-struct InsertPCHooksCmd
-{
-	InsertPCHooksCmd(int _which) : which(_which) {}
-	HostCommandType command = HOST_COMMAND_INSERT_PC_HOOKS;
-	int which;
-};
-struct InsertHookCmd // From host
-{
-	InsertHookCmd(HookParam hp) : hp(hp) {}
-	HostCommandType command = HOST_COMMAND_NEW_HOOK;
-	HookParam hp;
-};
-struct RemoveHookCmd // From host
-{
-	RemoveHookCmd(uint64_t address) : address(address) {}
-	HostCommandType command = HOST_COMMAND_REMOVE_HOOK;
-	uint64_t address;
-};
+enum SUPPORT_LANG;
 
-struct FindHookCmd // From host
-{
-	FindHookCmd(SearchParam sp) : sp(sp) {}
-	HostCommandType command = HOST_COMMAND_FIND_HOOK;
-	SearchParam sp;
-};
+#define DECLARE_SIMPLE_CMD(structname, type, var, CMD) \
+	struct structname                                  \
+	{                                                  \
+		structname(type _) : var(_) {}                 \
+		decltype(CMD) command = CMD;                   \
+		type var;                                      \
+	};
 
-struct HostInfoNotif // From dll
+// host->hook
+DECLARE_SIMPLE_CMD(SetLanguageCmd, SUPPORT_LANG, lang, HOST_COMMAND_SET_LANGUAGE)
+DECLARE_SIMPLE_CMD(InsertPCHooksCmd, int, which, HOST_COMMAND_INSERT_PC_HOOKS)
+DECLARE_SIMPLE_CMD(InsertHookCmd, HookParam, hp, HOST_COMMAND_NEW_HOOK)
+DECLARE_SIMPLE_CMD(RemoveHookCmd, uint64_t, address, HOST_COMMAND_REMOVE_HOOK)
+DECLARE_SIMPLE_CMD(FindHookCmd, SearchParam, sp, HOST_COMMAND_FIND_HOOK)
+
+// hook->host
+DECLARE_SIMPLE_CMD(HookRemovedNotif, uint64_t, address, HOST_NOTIFICATION_RMVHOOK)
+
+struct HostInfoNotif
 {
 	HostInfoNotif(std::string message = "") { strncpy_s(this->message, message.c_str(), MESSAGE_SIZE - 1); }
 	HostNotificationType command = HOST_NOTIFICATION_TEXT;
@@ -191,7 +280,7 @@ struct HostInfoNotif // From dll
 	char message[MESSAGE_SIZE] = {};
 };
 
-struct HookFoundNotif // From dll
+struct HookFoundNotif
 {
 	HookFoundNotif(HookParam hp, wchar_t *text) : hp(hp) { wcsncpy_s(this->text, text, MESSAGE_SIZE - 1); }
 	HostNotificationType command = HOST_NOTIFICATION_FOUND_HOOK;
@@ -199,14 +288,7 @@ struct HookFoundNotif // From dll
 	wchar_t text[MESSAGE_SIZE] = {}; // though type is wchar_t, may not be encoded in UTF-16 (it's just convenient to use wcs* functions)
 };
 
-struct HookRemovedNotif // From dll
-{
-	HookRemovedNotif(uint64_t address) : address(address) {};
-	HostNotificationType command = HOST_NOTIFICATION_RMVHOOK;
-	uint64_t address;
-};
-
-struct HookInsertingNotif // From dll
+struct HookInsertingNotif
 {
 	HookInsertingNotif(uint64_t addr1) : addr(addr1) {}
 	HostNotificationType command = HOST_NOTIFICATION_INSERTING_HOOK;
@@ -237,14 +319,14 @@ struct TextBuffer
 		if (!c)
 			return;
 		size = strlenEx(c) * sizeof(CharT);
-		if(size)
+		if (size)
 			strncpyEx((CharT *)buff, c, TEXT_BUFFER_SIZE);
 	}
 	template <typename StringT, typename = std::enable_if_t<!std::is_pointer_v<StringT>>>
 	void from(const StringT &c)
 	{
 		size = min(TEXT_BUFFER_SIZE, strSize(c));
-		if(size)
+		if (size)
 			memcpy(buff, c.data(), size);
 	}
 	template <typename AddrT>
@@ -253,7 +335,7 @@ struct TextBuffer
 		if (!ptr || !t)
 			return;
 		size = min(TEXT_BUFFER_SIZE, t);
-		if(size)
+		if (size)
 			memcpy(buff, (void *)ptr, size);
 	}
 	template <typename T>
@@ -287,11 +369,16 @@ struct TextBuffer
 		size = 0;
 	}
 };
-
+enum class Displaymode
+{
+	TRANS,
+	ORI_TRANS,
+	TRANS_ORI
+};
 struct CommonSharedMem
 {
 	UINT32 waittime;
-	UINT32 keeprawtext;
+	Displaymode displaymode;
 	uint64_t hash;
 	wchar_t text[1000];
 	bool fontCharSetEnabled;

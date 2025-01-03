@@ -57,7 +57,9 @@ class searcher(common):
         }
 
         response = self.proxysession.get(
-            "https://dlsoft.dmm.co.jp/search/?floor=digital_pcgame&searchstr={}&service=pcgame".format(title),
+            "https://dlsoft.dmm.co.jp/search/?floor=digital_pcgame&searchstr={}&service=pcgame".format(
+                title
+            ),
             headers=headers,
             cookies=cookies,
         )
@@ -170,11 +172,13 @@ class searcher(common):
 
         inner = simplehtmlparser(response.text, "div", '<div ref="product_slider_data"')
 
+        description = simplehtmlparser(
+            response.text, "div", '<div class="area-detail-read">'
+        )
         return {
             "title": title,
-            "imagepath_all": [
-                self.dispatchdownloadtask(_.replace("js-", "jp-")) for _ in imags2
-            ],
+            "images": [_.replace("js-", "jp-") for _ in imags2],
             "webtags": tags,
             "developers": [devp],
+            "description": description,
         }

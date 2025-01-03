@@ -29,10 +29,9 @@ mylinks = {
     "ocr_models": {
         "ja.zip": "https://github.com/test123456654321/RESOURCES/releases/download/ocr_models/ja.zip",
     },
-    "mecab_xp.zip": "https://github.com/HIllya51/RESOURCES/releases/download/common/mecab_xp.zip",
-    "mecab.zip": "https://github.com/HIllya51/RESOURCES/releases/download/common/mecab.zip",
-    "magpie.zip": "https://github.com/HIllya51/RESOURCES/releases/download/common/magpie.zip",
-    "themes.zip": "https://github.com/HIllya51/RESOURCES/releases/download/common/themes.zip",
+    "mecab_xp.zip": "https://github.com/HIllya51/mecab/releases/download/common/mecab_xp.zip",
+    "mecab.zip": "https://github.com/HIllya51/mecab/releases/download/common/mecab.zip",
+    "magpie.zip": "https://github.com/HIllya51/Magpie_CLI/releases/download/common/magpie.zip",
 }
 
 
@@ -208,9 +207,9 @@ def downloadCurl():
 
 def downloadOCRModel():
     os.chdir(rootDir + "\\files")
-    if not os.path.exists("ocr"):
-        os.mkdir("ocr")
-    os.chdir("ocr")
+    if not os.path.exists("ocrmodel"):
+        os.mkdir("ocrmodel")
+    os.chdir("ocrmodel")
     subprocess.run(f"curl -LO {mylinks['ocr_models']['ja.zip']}")
     subprocess.run(f"7z x ja.zip")
     os.remove(f"ja.zip")
@@ -264,16 +263,27 @@ cmake --build ../build/x86_xp --config Release --target ALL_BUILD -j 14
 def downloadbass():
 
     os.chdir(rootDir + "\\temp")
-    subprocess.run(f"curl -LO https://www.un4seen.com/files/bass24.zip")
-    subprocess.run(f"7z x bass24.zip -oALL")
-    shutil.move(
-        "ALL/bass.dll",
-        f"{rootDir}/files/plugins/DLL32",
-    )
-    shutil.move(
-        "ALL/x64/bass.dll",
-        f"{rootDir}/files/plugins/DLL64",
-    )
+    for link in (
+        "https://www.un4seen.com/files/bass24.zip",
+        "https://www.un4seen.com/files/z/2/bass_spx24.zip",
+        "https://www.un4seen.com/files/z/2/bass_aac24.zip",
+        "https://www.un4seen.com/files/bassopus24.zip",
+        "https://www.un4seen.com/files/bassenc24.zip",
+        "https://www.un4seen.com/files/bassenc_mp324.zip",
+        "https://www.un4seen.com/files/bassenc_opus24.zip",
+    ):
+        name = link.split("/")[-1]
+        d = name.split(".")[0]
+        subprocess.run("curl -LO " + link)
+        subprocess.run(f"7z x {name} -o{d}")
+        shutil.move(
+            f"{d}/{d[:-2]}.dll",
+            f"{rootDir}/files/plugins/DLL32",
+        )
+        shutil.move(
+            f"{d}/x64/{d[:-2]}.dll",
+            f"{rootDir}/files/plugins/DLL64",
+        )
 
 
 if __name__ == "__main__":
@@ -324,7 +334,7 @@ if __name__ == "__main__":
             os.makedirs("../../py/files/plugins/DLL32", exist_ok=True)
             shutil.copy("../builds/_x86/shareddllproxy32.exe", "../../py/files/plugins")
             shutil.copy(
-                "../builds/_x86/winsharedutils32.dll", "../../py/files/plugins/DLL32"
+                "../builds/_x86/winsharedutils.dll", "../../py/files/plugins/DLL32"
             )
             os.chdir(rootDir)
             os.system(f"python {os.path.join(rootthisfiledir,'collectall_xp.py')}")
@@ -362,21 +372,20 @@ if __name__ == "__main__":
 
         os.makedirs("../../py/files/plugins/DLL32", exist_ok=True)
         shutil.copy("../builds/_x86/shareddllproxy32.exe", "../../py/files/plugins")
-        shutil.copy("../builds/_x86/winrtutils32.dll", "../../py/files/plugins/DLL32")
+        shutil.copy("../builds/_x86/winrtutils.dll", "../../py/files/plugins/DLL32")
         shutil.copy(
-            "../builds/_x86/winsharedutils32.dll", "../../py/files/plugins/DLL32"
+            "../builds/_x86/winsharedutils.dll", "../../py/files/plugins/DLL32"
         )
         shutil.copy("../builds/_x86/wcocr.dll", "../../py/files/plugins/DLL32")
-        shutil.copy("../builds/_x86/LunaOCR32.dll", "../../py/files/plugins/DLL32")
+        shutil.copy("../builds/_x86/LunaOCR.dll", "../../py/files/plugins/DLL32")
         os.makedirs("../../py/files/plugins/DLL64", exist_ok=True)
         shutil.copy("../builds/_x64/shareddllproxy64.exe", "../../py/files/plugins")
-        shutil.copy("../builds/_x64/hookmagpie.dll", "../../py/files/plugins")
-        shutil.copy("../builds/_x64/winrtutils64.dll", "../../py/files/plugins/DLL64")
+        shutil.copy("../builds/_x64/winrtutils.dll", "../../py/files/plugins/DLL64")
         shutil.copy(
-            "../builds/_x64/winsharedutils64.dll", "../../py/files/plugins/DLL64"
+            "../builds/_x64/winsharedutils.dll", "../../py/files/plugins/DLL64"
         )
         shutil.copy("../builds/_x64/wcocr.dll", "../../py/files/plugins/DLL64")
-        shutil.copy("../builds/_x64/LunaOCR64.dll", "../../py/files/plugins/DLL64")
+        shutil.copy("../builds/_x64/LunaOCR.dll", "../../py/files/plugins/DLL64")
 
         if arch == "x86":
             os.chdir(rootDir)

@@ -15,6 +15,7 @@ bool NewHookJit(HookParam hp, LPCSTR name);
 void RemoveHook(uint64_t addr, int maxOffset = 9);
 std::string LoadResData(LPCWSTR pszResID, LPCWSTR _type);
 inline SearchParam spDefault;
+inline JITTYPE jittypedefault = JITTYPE::PC;
 // EOF
 int HookStrLen(HookParam *, BYTE *data);
 
@@ -24,11 +25,7 @@ extern std::unordered_map<uintptr_t, std::pair<JITTYPE, uint64_t>> jitaddr2emuad
 void jitaddraddr(uint64_t em_addr, uintptr_t jitaddr, JITTYPE);
 void jitaddrclear();
 
-void context_get(hook_stack *, PCONTEXT);
-void context_set(hook_stack *, PCONTEXT);
-
 void delayinsertadd(HookParam, std::string);
 void delayinsertNewHook(uint64_t);
-inline bool safeautoleaveveh = false;
 inline bool dont_detach = false;
 inline bool host_connected = false;

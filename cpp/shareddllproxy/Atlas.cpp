@@ -489,93 +489,24 @@ char *TranslateFull(char *otext, int freeText, int NeedAbort(int line, int lines
 	return out;
 }
 
-static wchar_t *logFile = 0;
-void SetLogFile(wchar_t *file)
-{
-	logFile = file;
-}
-
-wchar_t *TranslateFullLog(wchar_t *otext)
-{
-	if (logFile && logFile[0])
-	{
-		HANDLE hMutex = CreateMutex(0, 0, L"TRAG Logging Super Mutext +10 from Outer Space");
-		DWORD res;
-		if (hMutex)
-			res = WaitForSingleObject(hMutex, 2000);
-		HANDLE hFile = CreateFile(logFile, GENERIC_WRITE, FILE_SHARE_READ, 0, OPEN_ALWAYS, 0, 0);
-		if (hFile != INVALID_HANDLE_VALUE)
-		{
-			DWORD junk;
-			if (GetLastError() == ERROR_ALREADY_EXISTS)
-				SetFilePointer(hFile, 0, 0, FILE_END);
-			else
-			{
-				wchar_t bom = 0xFEFF;
-				WriteFile(hFile, &bom, sizeof(wchar_t), &junk, 0);
-			}
-			WriteFile(hFile, otext, sizeof(wchar_t) * wcslen(otext), &junk, 0);
-			WriteFile(hFile, L"\r\n", sizeof(wchar_t) * 2, &junk, 0);
-			CloseHandle(hFile);
-		}
-		if (hMutex)
-		{
-			// Prolly not needed.
-			if (WAIT_OBJECT_0 == res)
-				ReleaseMutex(hMutex);
-			CloseHandle(hMutex);
-		}
-	}
-	return TranslateFull(otext);
-}
-
 struct AtlasConfig atlcfg;
 
-HANDLE mutex = NULL;
+void writestring(const wchar_t *text, HANDLE hPipe);
+wchar_t *readstring(HANDLE hPipe);
 int atlaswmain(int argc, wchar_t *argv[])
 {
 
 	HANDLE hPipe = CreateNamedPipe(argv[1], PIPE_ACCESS_DUPLEX, PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT, PIPE_UNLIMITED_INSTANCES, 65535, 65535, NMPWAIT_WAIT_FOREVER, 0);
 
 	SetEvent(CreateEvent(&allAccess, FALSE, FALSE, argv[2]));
-	if (ConnectNamedPipe(hPipe, NULL) != NULL)
-	{
-		DWORD len = 0;
-	}
+	if (!ConnectNamedPipe(hPipe, NULL))
+		return 0;
 	while (true)
 	{
-		wchar_t src[4096] = {0};
-		DWORD _;
-		if (!ReadFile(hPipe, src, 4096 * 2, &_, NULL))
+		wchar_t *src = readstring(hPipe);
+		if (!src)
 			break;
 
-		if (!mutex)
-		{
-			mutex = CreateMutex(NULL, FALSE, NULL);
-			if (!mutex)
-			{
-				return false;
-			}
-		}
-		bool waitingForMutex = true;
-		while (waitingForMutex)
-		{
-			switch (WaitForSingleObject(mutex, INFINITE))
-			{
-			case WAIT_OBJECT_0:
-			{
-				waitingForMutex = false;
-				break;
-			}
-			case WAIT_ABANDONED:
-			{
-				return false;
-			}
-			default:
-			{
-			}
-			}
-		}
 		if (!AtlasIsLoaded())
 		{
 			// atlcfg.flags = ~BREAK_ON_SINGLE_LINE_BREAKS;
@@ -584,17 +515,14 @@ int atlaswmain(int argc, wchar_t *argv[])
 			InitAtlas(atlcfg, ATLAS_JAP_TO_ENG);
 			if (!AtlasIsLoaded())
 			{
-				ReleaseMutex(mutex);
-				auto text = L"Atlas Load Failed";
-				WriteFile(hPipe, text, wcslen(text) * 2, &_, NULL);
+				writestring(0, hPipe);
 				return false;
 			}
 		}
 		wchar_t *text = TranslateFull(src, 0, NULL, NULL);
-
-		WriteFile(hPipe, text, wcslen(text) * 2, &_, NULL);
+		writestring(text, hPipe);
+		free(src);
 		free(text);
-		ReleaseMutex(mutex);
 	}
 
 	return 0;

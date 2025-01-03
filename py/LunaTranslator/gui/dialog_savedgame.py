@@ -1,35 +1,36 @@
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QWidget
 from qtsymbols import *
 import os, functools, uuid
 from traceback import print_exc
 import gobject, qtawesome
-from gui.dynalang import LPushButton, LAction
+from gui.inputdialog import autoinitdialog
+from gui.dynalang import LAction
 from gui.dialog_savedgame_v3 import dialog_savedgame_v3
 from gui.dialog_savedgame_legacy import dialog_savedgame_legacy
 from gui.dialog_savedgame_setting import dialog_setting_game, userlabelset
-from myutils.wrapper import Singleton_close
+from myutils.utils import targetmod
+from myutils.wrapper import Singleton_close, tryprint
 from gui.specialwidget import lazyscrollflow
-from myutils.utils import str2rgba
 from myutils.config import (
     savehook_new_data,
     savegametaged,
     _TR,
     get_launchpath,
     globalconfig,
+    extradatas,
 )
 from gui.usefulwidget import (
     saveposwindow,
     getboxlayout,
-    MySwitch,
-    Prompt_dialog,
+    IconButton,
+    statusbutton,
     getsimplecombobox,
+    threeswitch,
+    FQLineEdit,
+    FocusCombo,
 )
 from gui.dialog_savedgame_common import (
-    ItemWidget,
     dialog_syssetting,
     tagitem,
-    TagWidget,
     startgamecheck,
     loadvisinternal,
     getalistname,
@@ -48,41 +49,21 @@ from gui.dialog_savedgame_common import (
 class dialog_savedgame_integrated(saveposwindow):
 
     def selectlayout(self, type):
+        self.syssettingbtn.setVisible(type != 0)
         try:
             globalconfig["gamemanager_integrated_internal_layout"] = type
             klass = [
-                dialog_savedgame_new,
-                dialog_savedgame_v3,
                 dialog_savedgame_legacy,
+                dialog_savedgame_v3,
+                dialog_savedgame_new,
             ][type]
-
-            [self.layout1btn, self.layout2btn, self.layout3btn][(type) % 3].setEnabled(
-                False
-            )
-            [self.layout1btn, self.layout2btn, self.layout3btn][
-                (type + 1) % 3
-            ].setEnabled(False)
-            [self.layout1btn, self.layout2btn, self.layout3btn][
-                (type + 2) % 3
-            ].setEnabled(False)
-            [self.layout1btn, self.layout2btn, self.layout3btn][
-                (type + 1) % 3
-            ].setChecked(False)
-            [self.layout1btn, self.layout2btn, self.layout3btn][
-                (type + 2) % 3
-            ].setChecked(False)
             _old = self.internallayout.takeAt(0).widget()
             _old.hide()
             _ = klass(self)
             self.internallayout.addWidget(_)
             _.directshow()
             _old.deleteLater()
-            [self.layout1btn, self.layout2btn, self.layout3btn][
-                (type + 1) % 3
-            ].setEnabled(True)
-            [self.layout1btn, self.layout2btn, self.layout3btn][
-                (type + 2) % 3
-            ].setEnabled(True)
+            self.__internal = _
         except:
             print_exc()
 
@@ -99,33 +80,294 @@ class dialog_savedgame_integrated(saveposwindow):
         w, self.internallayout = getboxlayout(
             [], margin0=True, makewidget=True, both=True
         )
-
+        self.__internal = None
         self.internallayout.addWidget(QWidget())
         self.setCentralWidget(w)
-        self.layout1btn = MySwitch(self, icon="fa.th")
-        self.layout2btn = MySwitch(self, icon="fa.th-list")
-        self.layout3btn = MySwitch(self, icon="fa.list")
-        self.layout1btn.clicked.connect(functools.partial(self.selectlayout, 0))
-        self.layout2btn.clicked.connect(functools.partial(self.selectlayout, 1))
-        self.layout3btn.clicked.connect(functools.partial(self.selectlayout, 2))
-        self.layout1btn.setFixedSize(QSize(20, 20))
-        self.layout2btn.setFixedSize(QSize(20, 20))
-        self.layout3btn.setFixedSize(QSize(20, 20))
+
+        self.switch = threeswitch(self, icons=["fa.list", "fa.th-list", "fa.th"])
+        self.switch.btnclicked.connect(self.selectlayout)
+        self.syssettingbtn = IconButton(icon="fa.gear", parent=self)
+        self.syssettingbtn.setFixedSize(QSize(25, 25))
+        self.syssettingbtn.clicked.connect(self.syssetting)
         self.show()
-        self.selectlayout(globalconfig["gamemanager_integrated_internal_layout"])
+        self.switch.selectlayout(globalconfig["gamemanager_integrated_internal_layout"])
+
+    def syssetting(self):
+        dialog_syssetting(
+            self.__internal,
+            type_=globalconfig["gamemanager_integrated_internal_layout"],
+        )
 
     def resizeEvent(self, e: QResizeEvent):
-        self.layout1btn.move(e.size().width() - self.layout1btn.width(), 0)
-        self.layout2btn.move(
-            e.size().width() - self.layout2btn.width() - self.layout1btn.width(), 0
+        x = e.size().width() - self.switch.width()
+        self.switch.move(x, 0)
+        x -= self.syssettingbtn.width()
+        self.syssettingbtn.move(x, 0)
+
+
+class TagWidget(QWidget):
+    tagschanged = pyqtSignal(tuple)  # ((tag,type,refdata),)
+    linepressedenter = pyqtSignal(str)
+    tagclicked = pyqtSignal(tuple)  # tag,type,refdata
+
+    def __init__(self, parent=None, exfoucus=True):
+        super().__init__(parent)
+        tagitem.setstyles(self)
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.setLayout(layout)
+
+        self.lineEdit = FocusCombo()
+        if exfoucus:
+            self.lineEdit.setLineEdit(FQLineEdit())
+            # FQLineEdit导致游戏管理页面里，点击编辑框后，下边界消失。
+            # FQLineEdit仅用于和webview同一窗口内焦点缺失问题，所以既然用不到那就不要多此一举了
+        else:
+            self.lineEdit.setEditable(True)
+        self.lineEdit.lineEdit().returnPressed.connect(
+            lambda: self.linepressedenter.emit(self.lineEdit.currentText())
         )
-        self.layout3btn.move(
-            e.size().width()
-            - self.layout3btn.width()
-            - self.layout2btn.width()
-            - self.layout1btn.width(),
-            0,
+
+        self.lineEdit.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
         )
+        self.tagtypes = ["usertags", "developers", "webtags", "usertags"]
+        self.tagtypes_zh = ["全部", "开发商", "标签", "自定义"]
+        self.tagtypes_1 = [
+            tagitem.TYPE_SEARCH,
+            tagitem.TYPE_DEVELOPER,
+            tagitem.TYPE_TAG,
+            tagitem.TYPE_USERTAG,
+        ]
+        layout.addWidget(self.lineEdit)
+
+        def __(idx):
+            t = self.lineEdit.currentText()
+            self.lineEdit.clear()
+            self.lineEdit.addItems(userlabelset(self.tagtypes[idx]))
+            self.lineEdit.setCurrentText(t)
+
+        self.typecombo = getsimplecombobox(self.tagtypes_zh, callback=__)
+        layout.addWidget(self.typecombo)
+        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+
+        self.tag2widget = {}
+
+        def callback(t):
+            if not t:
+                return
+            self.addTag(t, self.tagtypes_1[self.typecombo.currentIndex()])
+            self.lineEdit.clearEditText()
+
+        self.linepressedenter.connect(callback)
+        self.typecombo.currentIndexChanged.emit(0)
+
+    def addTags(self, tags, signal=True):
+        for key in tags:
+            self.__addTag(key)
+        self.__calltagschanged(signal)
+
+    @tryprint
+    def __addTag(self, key):
+        tag, _type, refdata = key
+        if not tag:
+            return
+        if key in self.tag2widget:
+            return
+        qw = tagitem(tag, _type=_type, refdata=refdata)
+        qw.removesignal.connect(self.removeTag)
+        qw.labelclicked.connect(self.tagclicked.emit)
+        layout = self.layout()
+        layout.insertWidget(layout.count() - 2, qw)
+        self.tag2widget[key] = qw
+        self.lineEdit.setFocus()
+
+    def addTag(self, tag, _type, refdata=None, signal=True):
+        self.__addTag((tag, _type, refdata))
+        self.__calltagschanged(signal)
+
+    def __removeTag(self, key):
+        _w = self.tag2widget[key]
+        self.layout().removeWidget(_w)
+        self.tag2widget.pop(key)
+
+    def removeTag(self, key, signal=True):
+        try:
+            self.__removeTag(key)
+            self.__calltagschanged(signal)
+        except:
+            pass
+
+    def __calltagschanged(self, signal):
+        if signal:
+            self.tagschanged.emit(tuple(self.tag2widget.keys()))
+
+    def clearTag(self, signal=True):
+        for key in self.tag2widget.copy():
+            try:
+                self.__removeTag(key)
+            except:
+                pass
+        self.__calltagschanged(signal)
+
+
+class IMGWidget(QLabel):
+
+    def adaptsize(self, size: QSize):
+
+        if globalconfig["imagewrapmode"] == 0:
+            h, w = size.height(), size.width()
+            r = float(w) / h
+            max_r = float(self.width()) / self.height()
+            if r < max_r:
+                new_w = self.width()
+                new_h = int(new_w / r)
+            else:
+                new_h = self.height()
+                new_w = int(new_h * r)
+            return QSize(new_w, new_h)
+        elif globalconfig["imagewrapmode"] == 1:
+            h, w = size.height(), size.width()
+            r = float(w) / h
+            max_r = float(self.width()) / self.height()
+            if r > max_r:
+                new_w = self.width()
+                new_h = int(new_w / r)
+            else:
+                new_h = self.height()
+                new_w = int(new_h * r)
+            return QSize(new_w, new_h)
+        elif globalconfig["imagewrapmode"] == 2:
+            return self.size()
+        elif globalconfig["imagewrapmode"] == 3:
+            return size
+
+    def setimg(self, pixmap: QPixmap):
+        if pixmap.isNull():
+            return
+        if not (self.height() and self.width()):
+            return
+        if self.__last == (self.size(), globalconfig["imagewrapmode"]):
+            return
+        self.__last = (self.size(), globalconfig["imagewrapmode"])
+        rate = self.devicePixelRatioF()
+        newpixmap = QPixmap(self.size() * rate)
+        newpixmap.setDevicePixelRatio(rate)
+        newpixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(newpixmap)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.drawPixmap(self.getrect(pixmap.size()), pixmap)
+        painter.end()
+        self.setPixmap(newpixmap)
+
+    def getrect(self, size):
+        size = self.adaptsize(size)
+        rect = QRect()
+        rect.setX(int((self.width() - size.width()) / 2))
+        rect.setY(int((self.height() - size.height()) / 2))
+        rect.setSize(size)
+        return rect
+
+    def resizeEvent(self, a0):
+        self.setimg(self._pixmap)
+        return super().resizeEvent(a0)
+
+    def __init__(self, p, pixmap) -> None:
+        super().__init__(p)
+        self.setScaledContents(True)
+        if type(pixmap) != QPixmap:
+            pixmap = pixmap()
+        self._pixmap = pixmap
+        self.__last = None
+
+    def switch(self):
+        self.setimg(self._pixmap)
+
+
+class ItemWidget(QWidget):
+    focuschanged = pyqtSignal(bool, str)
+    doubleclicked = pyqtSignal(str)
+    globallashfocus = None
+
+    @classmethod
+    def clearfocus(cls):
+        try:  # 可能已被删除
+            if ItemWidget.globallashfocus:
+                ItemWidget.globallashfocus.focusOut()
+        except:
+            pass
+        ItemWidget.globallashfocus = None
+
+    def click(self):
+        try:
+            self.bottommask.show()
+            if self != ItemWidget.globallashfocus:
+                ItemWidget.clearfocus()
+            ItemWidget.globallashfocus = self
+            self.focuschanged.emit(True, self.gameuid)
+        except:
+            print_exc()
+
+    def mousePressEvent(self, ev) -> None:
+        self.click()
+
+    def focusOut(self):
+        self.bottommask.hide()
+        self.focuschanged.emit(False, self.gameuid)
+
+    def mouseDoubleClickEvent(self, e):
+        self.doubleclicked.emit(self.gameuid)
+
+    def resizeEvent(self, a0: QResizeEvent) -> None:
+        self.bottommask.resize(a0.size())
+        self.maskshowfileexists.resize(a0.size())
+
+    def others(self):
+        self.l.setContentsMargins(
+            *([globalconfig["dialog_savegame_layout"]["margin2"]] * 4)
+        )
+
+        if self._img._pixmap.isNull():
+            pass
+        else:
+            self._lb.setFixedHeight(globalconfig["dialog_savegame_layout"]["textH"])
+            self._img.switch()
+
+    def __init__(self, gameuid) -> None:
+        super().__init__()
+        self.gameuid = gameuid
+        self.maskshowfileexists = QLabel(self)
+        self.l = QVBoxLayout(self)
+        self.l.setSpacing(0)
+        self.l.setContentsMargins(
+            *([globalconfig["dialog_savegame_layout"]["margin2"]] * 4)
+        )
+        for image in savehook_new_data[gameuid]["imagepath_all"]:
+            fr = extradatas["imagefrom"].get(image)
+            if fr:
+                targetmod.get(fr).dispatchdownloadtask(image)
+
+        self._img = IMGWidget(self, getpixfunction(gameuid))
+        self._lb = QLabel(self)
+        if self._img._pixmap.isNull():
+            self.l.addStretch(1)
+        else:
+            self._lb.setFixedHeight(globalconfig["dialog_savegame_layout"]["textH"])
+            self.l.addWidget(self._img)
+        self._lb.setText(savehook_new_data[gameuid]["title"])
+        self._lb.setWordWrap(True)
+        self._lb.setObjectName("savegame_textfont1")
+        self._lb.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.l.addWidget(self._lb)
+        exists = os.path.exists(get_launchpath(gameuid))
+        self.maskshowfileexists.setObjectName("savegame_exists" + str(exists))
+        if not exists:
+            self.maskshowfileexists.raise_()
+        self.bottommask = QLabel(self)
+        self.bottommask.hide()
+        self.bottommask.setObjectName("savegame_onselectcolor1")
 
 
 class dialog_savedgame_new(QWidget):
@@ -188,12 +430,23 @@ class dialog_savedgame_new(QWidget):
         self.flow.deleteLater()
         self.flow = lazyscrollflow()
         self.flow.bgclicked.connect(ItemWidget.clearfocus)
-        self.formLayout.insertWidget(self.formLayout.count() - 1, self.flow)
+        self.flow.setsize(
+            QSize(
+                globalconfig["dialog_savegame_layout"]["itemw"],
+                globalconfig["dialog_savegame_layout"]["itemh"],
+            )
+        )
+        self.flow.setSpacing(globalconfig["dialog_savegame_layout"]["margin"])
+        self.formLayout.insertWidget(self.formLayout.count(), self.flow)
         idx = 0
         for k in self.reflist:
             if newtags != self.currtags:
                 break
             notshow = False
+            webtags = [
+                globalconfig["tagNameRemap"].get(tag, tag)
+                for tag in savehook_new_data[k]["webtags"]
+            ]
             for tag, _type, _ in tags:
                 if _type == tagitem.TYPE_EXISTS:
                     if os.path.exists(get_launchpath(k)) == False:
@@ -204,16 +457,16 @@ class dialog_savedgame_new(QWidget):
                         notshow = True
                         break
                 elif _type == tagitem.TYPE_TAG:
-                    if tag not in savehook_new_data[k]["webtags"]:
+                    if tag not in webtags:
                         notshow = True
                         break
                 elif _type == tagitem.TYPE_USERTAG:
                     if tag not in savehook_new_data[k]["usertags"]:
                         notshow = True
                         break
-                elif _type == tagitem.TYPE_RAND:
+                elif _type == tagitem.TYPE_SEARCH:
                     if (
-                        tag not in savehook_new_data[k]["webtags"]
+                        tag not in webtags
                         and tag not in savehook_new_data[k]["usertags"]
                         and tag not in savehook_new_data[k]["title"]
                         and tag not in savehook_new_data[k]["developers"]
@@ -242,13 +495,11 @@ class dialog_savedgame_new(QWidget):
         gamesetting = LAction(("游戏设置"))
         addgame = LAction(("添加游戏"))
         batchadd = LAction(("批量添加"))
-        othersetting = LAction(("其他设置"))
 
         if self.currentfocusuid:
             exists = os.path.exists(get_launchpath(self.currentfocusuid))
             if exists:
                 menu.addAction(startgame)
-            if exists:
                 menu.addAction(opendir)
             menu.addAction(gamesetting)
             menu.addAction(delgame)
@@ -264,7 +515,6 @@ class dialog_savedgame_new(QWidget):
             menu.addAction(addgame)
             menu.addAction(batchadd)
             menu.addSeparator()
-            menu.addAction(othersetting)
         action = menu.exec(self.mapToGlobal(p))
         if action == startgame:
             startgamecheck(self, getreflist(self.reftagid), self.currentfocusuid)
@@ -280,29 +530,18 @@ class dialog_savedgame_new(QWidget):
             self.clicked3()
         elif action == batchadd:
             self.clicked3_batch()
-        elif action == othersetting:
-            dialog_syssetting(self)
 
         elif action == editname or action == addlist:
-            _dia = Prompt_dialog(
-                self,
-                "修改列表名称" if action == editname else "创建列表",
-                "",
-                [
-                    [
-                        "名称",
-                        (
-                            savegametaged[calculatetagidx(self.reftagid)]["title"]
-                            if action == editname
-                            else ""
-                        ),
-                    ],
-                ],
-            )
+            __d = {
+                "k": (
+                    savegametaged[calculatetagidx(self.reftagid)]["title"]
+                    if action == editname
+                    else ""
+                )
+            }
 
-            if _dia.exec():
-
-                title = _dia.text[0].text()
+            def cb(__d):
+                title = __d["k"]
                 if title != "":
                     i = calculatetagidx(self.reftagid)
                     if action == addlist:
@@ -318,6 +557,25 @@ class dialog_savedgame_new(QWidget):
 
                         savegametaged[i]["title"] = title
                         self.loadcombo(False)
+
+            autoinitdialog(
+                self,
+                __d,
+                "修改列表名称" if action == editname else "创建列表",
+                600,
+                [
+                    {
+                        "type": "lineedit",
+                        "name": "名称",
+                        "k": "k",
+                    },
+                    {
+                        "type": "okcancel",
+                        "callback": functools.partial(cb, __d),
+                    },
+                ],
+                exec_=True,
+            )
         elif action == dellist:
             i = calculatetagidx(self.reftagid)
             savegametaged.pop(i)
@@ -351,6 +609,26 @@ class dialog_savedgame_new(QWidget):
             ),
         )
 
+    def callexists(self, _):
+        if _:
+            self.tagswidget.addTag(_TR("存在"), tagitem.TYPE_EXISTS)
+        else:
+            self.tagswidget.removeTag((_TR("存在"), tagitem.TYPE_EXISTS, None))
+
+    def callchange(self):
+        self.flow.setsize(
+            QSize(
+                globalconfig["dialog_savegame_layout"]["itemw"],
+                globalconfig["dialog_savegame_layout"]["itemh"],
+            )
+        )
+        self.flow.setSpacing(globalconfig["dialog_savegame_layout"]["margin"])
+        self.flow.resizeandshow()
+        for _ in self.flow.widgets:
+            if not isinstance(_, ItemWidget):
+                continue
+            _.others()
+
     def setstyle(self):
         key = "savegame_textfont1"
         fontstring = globalconfig.get(key, "")
@@ -361,23 +639,15 @@ class dialog_savedgame_new(QWidget):
             _style += "font-size:{}pt;".format(_f.pointSize())
             _style += 'font-family:"{}";'.format(_f.family())
         style = "#{}{{ {} }}".format(key, _style)
-        for exits in [True, False]:
-            c = globalconfig["dialog_savegame_layout"][
-                ("onfilenoexistscolor1", "backcolor1")[exits]
-            ]
-            c = str2rgba(
-                c,
-                globalconfig["dialog_savegame_layout"][
-                    ("transparentnotexits", "transparent")[exits]
-                ],
-            )
 
-            style += "#savegame_exists{}{{background-color:{};}}".format(exits, c)
+        style += "#savegame_existsTrue{{background-color:{};}}".format(
+            globalconfig["dialog_savegame_layout"]["backcolor2"]
+        )
+        style += "#savegame_existsFalse{{background-color:{};}}".format(
+            globalconfig["dialog_savegame_layout"]["onfilenoexistscolor2"]
+        )
         style += "#savegame_onselectcolor1{{background-color: {};}}".format(
-            str2rgba(
-                globalconfig["dialog_savegame_layout"]["onselectcolor1"],
-                globalconfig["dialog_savegame_layout"]["transparentselect"],
-            )
+            globalconfig["dialog_savegame_layout"]["onselectcolor2"]
         )
         self.setStyleSheet(style)
 
@@ -395,28 +665,12 @@ class dialog_savedgame_new(QWidget):
         self.reflist = getreflist(globalconfig["currvislistuid"])
         self.reftagid = globalconfig["currvislistuid"]
 
-        def callback(t):
-            if not t:
-                return
-            labelset = userlabelset()
-            if t in labelset:
-                tp = tagitem.TYPE_USERTAG
-            else:
-                tp = tagitem.TYPE_RAND
-            self.tagswidget.addTag(t, tp)
-
-            self.tagswidget.lineEdit.clear()
-            self.tagswidget.lineEdit.addItems(labelset)
-            self.tagswidget.lineEdit.clearEditText()
-
         self.tagswidget = TagWidget(self, exfoucus=False)
-        self.tagswidget.lineEdit.addItems(userlabelset())
-        self.tagswidget.lineEdit.setCurrentText("")
-        self.tagswidget.linepressedenter.connect(callback)
+
         self.currtags = tuple()
         self.tagswidget.tagschanged.connect(self.tagschanged)
         _ = QLabel()
-        _.setFixedWidth(60)
+        _.setFixedWidth(80)
         layout.addWidget(self.tagswidget)
         layout.addWidget(_)
         formLayout.addLayout(layout)
@@ -425,29 +679,8 @@ class dialog_savedgame_new(QWidget):
         self.customContextMenuRequested.connect(self.showmenu)
         formLayout.addWidget(self.flow)
         self.formLayout = formLayout
-        buttonlayout = QHBoxLayout()
-        self.buttonlayout = buttonlayout
         self.savebutton = []
-        self.simplebutton(
-            "开始游戏",
-            True,
-            lambda: startgamecheck(
-                self, getreflist(self.reftagid), self.currentfocusuid
-            ),
-            True,
-        )
-        self.simplebutton("游戏设置", True, self.showsettingdialog, False)
-        self.simplebutton("删除游戏", True, self.clicked2, False)
-        self.simplebutton("打开目录", True, self.clicked4, True)
 
-        self.simplebutton("添加到列表", True, self.addtolist, False)
-        # if globalconfig["startgamenototop"]:
-        self.simplebutton("左移", True, functools.partial(self.moverank, -1), False)
-        self.simplebutton("右移", True, functools.partial(self.moverank, 1), False)
-        self.simplebutton("添加游戏", False, self.clicked3, 1)
-        self.simplebutton("批量添加", False, self.clicked3_batch, 1)
-        self.simplebutton("其他设置", False, lambda: dialog_syssetting(self), False)
-        formLayout.addLayout(buttonlayout)
         self.idxsave = []
         self.setLayout(formLayout)
         self.activategamenum = 1
@@ -484,6 +717,44 @@ class dialog_savedgame_new(QWidget):
             idx = getreflist(uid).index(gameuid)
             getreflist(uid).insert(0, getreflist(uid).pop(idx))
 
+    def keyPressEvent(self, e: QKeyEvent):
+        if self.currentfocusuid:
+            if e.key() == Qt.Key.Key_Return:
+                startgamecheck(self, getreflist(self.reftagid), self.currentfocusuid)
+            elif e.key() == Qt.Key.Key_Delete:
+                self.clicked2()
+            elif e.key() == Qt.Key.Key_Left:
+                if e.modifiers() == Qt.KeyboardModifier.ControlModifier:
+                    self.moverank(-1)
+                else:
+                    self.movefocus(-1)
+            elif e.key() == Qt.Key.Key_Right:
+                if e.modifiers() == Qt.KeyboardModifier.ControlModifier:
+                    self.moverank(1)
+                else:
+                    self.movefocus(1)
+        super().keyPressEvent(e)
+
+    def movefocus(self, dx):
+        game = self.currentfocusuid
+
+        idx1 = self.idxsave.index(game)
+        idx2 = (idx1 + dx) % len(self.idxsave)
+
+        if idx1 == 0 and dx == -1:
+            self.flow.verticalScrollBar().setValue(
+                self.flow.verticalScrollBar().maximum()
+            )
+        else:
+            try:
+                self.flow.ensureWidgetVisible(self.flow.widget(idx2))
+            except:
+                pass
+        try:
+            self.flow.widget(idx2).click()
+        except:
+            pass
+
     def moverank(self, dx):
         game = self.currentfocusuid
 
@@ -493,6 +764,10 @@ class dialog_savedgame_new(QWidget):
         self.idxsave.insert(idx2, self.idxsave.pop(idx1))
         self.flow.switchidx(idx1, idx2)
 
+        try:
+            self.flow.ensureWidgetVisible(self.flow.widget(idx2))
+        except:
+            pass
         idx1 = self.reflist.index(game)
         idx2 = self.reflist.index(game2)
         self.reflist.insert(idx2, self.reflist.pop(idx1))
@@ -502,16 +777,6 @@ class dialog_savedgame_new(QWidget):
             dialog_setting_game(self.parent(), self.currentfocusuid)
         except:
             print_exc()
-
-    def simplebutton(self, text, save, callback, exists):
-        button5 = LPushButton(text)
-        button5.setMinimumWidth(10)
-        if save:
-            self.savebutton.append((button5, exists))
-        button5.clicked.connect(callback)
-        button5.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.buttonlayout.addWidget(button5)
-        return button5
 
     def itemfocuschanged(self, b, k):
 
@@ -529,9 +794,7 @@ class dialog_savedgame_new(QWidget):
             _btn.setEnabled(_able1)
 
     def getagameitem(self, k, focus):
-        gameitem = ItemWidget(
-            k, functools.partial(getpixfunction, k), savehook_new_data[k]["title"]
-        )
+        gameitem = ItemWidget(k)
         gameitem.doubleclicked.connect(
             functools.partial(startgamecheck, self, getreflist(self.reftagid))
         )
@@ -542,16 +805,9 @@ class dialog_savedgame_new(QWidget):
 
     def newline(self, k, first=False):
 
-        itemw = globalconfig["dialog_savegame_layout"]["itemw"]
-        itemh = globalconfig["dialog_savegame_layout"]["itemh"]
-
         if first:
             self.idxsave.insert(0, k)
-            self.flow.insertwidget(
-                0, (functools.partial(self.getagameitem, k, True), QSize(itemw, itemh))
-            )
+            self.flow.insertwidget(0, functools.partial(self.getagameitem, k, True))
         else:
             self.idxsave.append(k)
-            self.flow.addwidget(
-                (functools.partial(self.getagameitem, k, False), QSize(itemw, itemh))
-            )
+            self.flow.addwidget(functools.partial(self.getagameitem, k, False))

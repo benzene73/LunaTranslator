@@ -66,10 +66,12 @@ def gethookgrid_em(self):
             "",
         ],
         [
-            "保留原文",
-            D_getsimpleswitch(
+            "显示模式",
+            "",
+            D_getsimplecombobox(
+                ["翻译", "原文_翻译", "翻译_原文"],
                 globalconfig["embedded"],
-                "keeprawtext",
+                "displaymode",
                 callback=lambda _: gobject.baseobject.textsource.flashembedsettings(),
             ),
         ],
@@ -191,10 +193,6 @@ def gethookgrid(self):
                 ),
                 2,
             ),
-        ],
-        [
-            "使用YAPI注入",
-            D_getsimpleswitch(globalconfig, "use_yapi"),
         ],
     ]
 

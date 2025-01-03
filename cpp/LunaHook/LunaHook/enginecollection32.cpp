@@ -1,16 +1,15 @@
-#include "engine32/PPSSPP.h"
 #include "engine32/LovaGame.h"
-#include "engine32/PCSX2.h"
 #include "engine32/VanillawareGC.h"
 #include "engine32/V8.h"
 #include "engine32/cef.h"
 #include "engine32/KISS.h"
-#include "engine32/mono.h"
 #include "engine32/Tarte.h"
 #include "engine32/sakanagl.h"
+#include "engine32/H_do_C.h"
 #include "engine32/LCScript.h"
 #include "engine32/Cage.h"
 #include "engine32/ONScripterru.h"
+#include "engine32/AbogadoPowers.h"
 #include "engine32/Winters.h"
 #include "engine32/CoffeeMaker.h"
 #include "engine32/TACTICS.h"
@@ -26,6 +25,8 @@
 #include "engine32/Fizz.h"
 #include "engine32/Aromarie.h"
 #include "engine32/Ruf.h"
+#include "engine32/antique.h"
+#include "engine32/BunBun.h"
 #include "engine32/SYSD.h"
 #include "engine32/Diskdream.h"
 #include "engine32/RPGMakerRGSS3.h"
@@ -114,7 +115,7 @@
 #include "engine32/Sceplay.h"
 #include "engine32/Onscripter.h"
 #include "engine32/Candy.h"
-#include "engine32/AIL2.h"
+#include "engine32/AIL.h"
 #include "engine32/ApricoT.h"
 #include "engine32/Triangle.h"
 #include "engine32/GASTRO.h"
@@ -180,17 +181,20 @@
 #include "engine32/Ciel.h"
 #include "engine32/CisLugI.h"
 #include "engine32/A98SYS.h"
+#include "engine32/DAC.h"
 #include "engine32/ACTGS.h"
+#include "engine32/e_Erekiteru.h"
 #include "engine32/GuruGuruSMF4.h"
 #include "NoEngine.h"
+#include "engines/mono/mono.h"
 #include "engines/lua/lua51.h"
 #include "engines/python/Renpy.h"
+#include "engines/ppsspp/ppsspp.h"
 std::vector<ENGINE *> check_engines()
 {
     return {
         new LovaGame,
-        new PPSSPPengine,
-        new PCSX2,
+        new PPSSPPWindows,
         new VanillawareGC,
         new V8,
         new cef,
@@ -253,7 +257,7 @@ std::vector<ENGINE *> check_engines()
         new RRE,
         new Candy,
         new WillowSoft,
-        new AIL2,
+        new AIL,
         new ApricoT,
         new Triangle2,
         new Triangle,
@@ -419,5 +423,11 @@ std::vector<ENGINE *> check_engines()
         new Aromarie,
         new Moonstone,
         new T2U,
-    };
+        new antique,
+        new BunBun,
+        new DAC,
+        new AbogadoPowers,
+        new e_Erekiteru,
+        new H_do_C
+        };
 }

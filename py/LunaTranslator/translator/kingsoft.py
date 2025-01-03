@@ -64,7 +64,7 @@ class TS(basetrans):
             )
         return True
 
-    def x64(self, content):
+    def translate(self, content):
         if self.checkpath() == False:
             raise Exception(_TR("翻译器加载失败"))
         ress = []
@@ -77,8 +77,5 @@ class TS(basetrans):
 
         return "\n".join(ress)
 
-    def translate(self, content):
-        return self.x64(content)
-
     def langmap(self):
-        return {"zh": "SChinese", "cht": "TChinese", "en": "English", "ja": "Japanese"}
+        return {"zh": "SChinese", "cht": "TChinese", "en": "English", "ja": "Japanese", "auto": "Japanese"}

@@ -26,6 +26,7 @@ enum HostCommandType
   HOST_COMMAND_HIJACK_PROCESS,
   HOST_COMMAND_DETACH,
   HOST_COMMAND_INSERT_PC_HOOKS,
+  HOST_COMMAND_SET_LANGUAGE,
 };
 
 enum HostNotificationType
@@ -35,7 +36,6 @@ enum HostNotificationType
   HOST_NOTIFICATION_FOUND_HOOK,
   HOST_NOTIFICATION_RMVHOOK,
   HOST_NOTIFICATION_INSERTING_HOOK,
-  HOST_SETTEXTTHREADTYPE,
 };
 enum class HOSTINFO
 {
@@ -64,7 +64,7 @@ enum HookParamType : uint64_t
 
   NEXT_MASK(USING_CHAR), // text_fun!=nullptr && (CODE_ANSI_BE||CODE_UTF16)
   NEXT_MASK(USING_STRING),
-  NEXT_MASK(SPECIAL_JIT_STRING),
+  NEXT_MASK(CSHARP_STRING),
 
   NEXT_MASK(FULL_STRING),
 
@@ -98,6 +98,7 @@ enum HookParamType : uint64_t
 enum HookFontType : unsigned
 {
   DECLARE_VALUE(NOT_HOOK_FONT, 0),
+  NEXT_MASK(DISABLE_FONT_SWITCH),
   NEXT_MASK(F_CreateFontA),
   NEXT_MASK(F_CreateFontW),
   NEXT_MASK(F_CreateFontIndirectA),

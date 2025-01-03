@@ -27,7 +27,10 @@ class TS(basetrans):
             return
         with open(pp, "r", encoding="utf8") as f:
             try:
-                self.json.update(json.load(f))
+                for k, v in json.load(f).items():
+                    if k not in self.json:
+                        self.json[k] = []
+                    self.json[k].append(v)
             except:
                 pass
 
@@ -47,7 +50,7 @@ class TS(basetrans):
             self.unsafegetcurrentgameconfig(), tuple(self.config["jsonfile"])
         )
 
-    def analyze_result(self, obj):
+    def analyze_result__(self, obj):
         if type(obj) == str:
             return obj
         if type(obj) != dict:
@@ -63,22 +66,34 @@ class TS(basetrans):
 
         return None
 
+    def analyze_result(self, obj):
+        _x = []
+        for _ in obj:
+            __ = self.analyze_result__(_)
+            if __:
+                _x.append(__)
+        return _x
+
     def delayloadlines(self):
         if self.lines is not None:
             return
         self.lines = {}
-        for k, v in self.json.items():
+        for k, vs in self.json.items():
             if "\n" not in k:
                 continue
-            v = self.analyze_result(v)
-            if not v:
+            vs = self.analyze_result(vs)
+            if not vs:
                 continue
             ks = k.split("\n")
-            vs = v.split("\n")
-            if len(ks) != len(vs):
-                continue
-            for i in range(len(ks)):
-                self.lines[ks[i]] = vs[i]
+
+            vss = [v.split("\n") for v in vs]
+            for vs in vss:
+                if len(ks) != len(vs):
+                    continue
+                for i in range(len(ks)):
+                    if ks[i] not in self.lines:
+                        self.lines[ks[i]] = []
+                    self.lines[ks[i]].append(vs[i])
 
     def tryfindtranslate(self, content: str, _js: dict, _js2: dict = None):
         if globalconfig["premtsimi2"] < 100:
@@ -110,16 +125,16 @@ class TS(basetrans):
             line = self.tryfindtranslate(line, self.json, self.lines)
             if not line:
                 return None
-            collect.append(line)
-        return "\n".join(collect)
+            collect.append("\n".join(line))
+        return collect
 
     def translate(self, content):
         self.checkfilechanged(
             self.unsafegetcurrentgameconfig(), tuple(self.config["jsonfile"])
         )
         res = self.tryfindtranslate(content, self.json)
-        if (not res) and ("\n" in content):
+        if not res:
             res = self.tryfindtranslate_single(content)
         if not res:
             raise Exception("can't find: " + content)
-        return res
+        return "\n".join(res)

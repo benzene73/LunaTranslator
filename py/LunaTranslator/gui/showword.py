@@ -2,7 +2,7 @@ from qtsymbols import *
 import json, time, functools, os, base64, uuid
 from urllib.parse import quote
 from traceback import print_exc
-import qtawesome, requests, gobject, windows, winsharedutils
+import qtawesome, requests, gobject, windows
 import myutils.ankiconnect as anki
 from myutils.hwnd import grabwindow
 from myutils.config import globalconfig, static_data, _TR
@@ -34,7 +34,7 @@ from gui.usefulwidget import (
     getIconButton,
     saveposwindow,
     tabadd_lazy,
-    LRButton,
+    VisLFormLayout,
 )
 from gui.dynalang import (
     LPushButton,
@@ -46,6 +46,7 @@ from gui.dynalang import (
     LMainWindow,
     LAction,
 )
+from myutils.audioplayer import bass_code_cast
 
 
 def getimageformat():
@@ -63,7 +64,8 @@ class AnkiWindow(QWidget):
     def callbacktts(self, edit, sig, data):
         if sig != edit.sig:
             return
-        fname = gobject.gettempdir(str(uuid.uuid4()) + ".mp3")
+        data, ext = bass_code_cast(data, "mp3")
+        fname = gobject.gettempdir(str(uuid.uuid4()) + "." + ext)
         with open(fname, "wb") as ff:
             ff.write(data)
         self.settextsignal.emit(edit, os.path.abspath(fname))
@@ -93,7 +95,11 @@ class AnkiWindow(QWidget):
     def asyncocr(self, img):
         self.__ocrsettext.emit(ocr_run(img)[0])
 
-    def crop(self):
+    def crophide(self, s=False):
+        if s:
+            self.parent().parent().parent().hide()
+            gobject.baseobject.translation_ui.hide_()
+
         def ocroncefunction(rect):
             img = imageCut(0, rect[0][0], rect[0][1], rect[1][0], rect[1][1])
             fname = gobject.gettempdir(str(uuid.uuid4()) + "." + getimageformat())
@@ -101,6 +107,9 @@ class AnkiWindow(QWidget):
             self.settextsignal.emit(self.editpath, os.path.abspath(fname))
             if globalconfig["ankiconnect"]["ocrcroped"]:
                 self.asyncocr(img)
+            if s:
+                gobject.baseobject.translation_ui.show_()
+                self.parent().parent().parent().show()
 
         rangeselct_function(ocroncefunction, False)
 
@@ -324,7 +333,7 @@ class AnkiWindow(QWidget):
             ff.write(model_css)
 
     def creatsetdtab(self, baselay):
-        layout = LFormLayout()
+        layout = VisLFormLayout()
         wid = QWidget()
         wid.setLayout(layout)
         baselay.addWidget(wid)
@@ -378,6 +387,39 @@ class AnkiWindow(QWidget):
             "成功添加后关闭窗口",
             getsimpleswitch(globalconfig["ankiconnect"], "addsuccautoclose"),
         )
+        cnt = layout.rowCount() + 1
+
+        def __(xx):
+            i = ["mp3", "opus"].index(xx)
+            layout.setRowVisible(cnt + 0, False)
+            layout.setRowVisible(cnt + 1, False)
+            layout.setRowVisible(cnt + i, True)
+
+        layout.addRow(
+            "音频编码",
+            getsimplecombobox(
+                ["mp3", "opus(ogg)"],
+                globalconfig,
+                "audioformat",
+                internal=["mp3", "opus"],
+                callback=__,
+            ),
+        )
+
+        layout.addRow(
+            "MP3 bitrate",
+            getsimplecombobox(
+                [str(8 * i) for i in range(1, 320 // 8 + 1)],
+                globalconfig,
+                "mp3kbps",
+                internal=[8 * i for i in range(1, 320 // 8 + 1)],
+            ),
+        )
+        layout.addRow(
+            "OPUS bitrate",
+            getspinbox(6, 256, globalconfig, "opusbitrate"),
+        )
+        __(globalconfig["audioformat"])
 
     def vistranslate_rank(self):
         listediter(
@@ -415,7 +457,7 @@ class AnkiWindow(QWidget):
             windows.keybd_event(mode, 0, windows.KEYEVENTF_KEYUP, 0)
 
     def startorendrecord(self, ii, target: QLineEdit, idx):
-        if idx == 1:
+        if idx:
             self.recorders[ii] = loopbackrecorder()
             self.simulate_key(ii)
         else:
@@ -434,7 +476,11 @@ class AnkiWindow(QWidget):
         soundbutton2 = QPushButton(qtawesome.icon("fa.music"), "")
         soundbutton2.clicked.connect(self.langdu2)
         cropbutton = QPushButton(qtawesome.icon("fa.crop"), "")
-        cropbutton.clicked.connect(self.crop)
+        cropbutton.clicked.connect(functools.partial(self.crophide, False))
+        cropbutton.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        cropbutton.customContextMenuRequested.connect(
+            functools.partial(self.crophide, True)
+        )
 
         grabwindowbtn = QPushButton(qtawesome.icon("fa.camera"), "")
         grabwindowbtn.clicked.connect(
@@ -449,6 +495,29 @@ class AnkiWindow(QWidget):
             clearbtn.clicked.connect(lambda: target.clear())
             return clearbtn
 
+        class ctrlbedit(FQPlainTextEdit):
+            def keyPressEvent(self, e):
+                if (
+                    e.modifiers() == Qt.KeyboardModifier.ControlModifier
+                    and e.key() == Qt.Key.Key_B
+                ):
+                    cursor = self.textCursor()
+                    if cursor.hasSelection():
+                        selected_text = cursor.selectedText()
+                        new_text = "<b>{}</b>".format(selected_text)
+
+                        start = cursor.selectionStart()
+
+                        cursor.beginEditBlock()
+                        cursor.insertText(new_text)
+                        cursor.endEditBlock()
+                        cursor.setPosition(start, QTextCursor.MoveMode.MoveAnchor)
+                        cursor.setPosition(
+                            start + len(new_text), QTextCursor.MoveMode.KeepAnchor
+                        )
+                        self.setTextCursor(cursor)
+                return super().keyPressEvent(e)
+
         self.audiopath = QLineEdit()
         self.audiopath.setReadOnly(True)
         self.audiopath_sentence = QLineEdit()
@@ -457,8 +526,8 @@ class AnkiWindow(QWidget):
         self.editpath.setReadOnly(True)
         self.viewimagelabel = pixmapviewer()
         self.editpath.textChanged.connect(self.wrappedpixmap)
-        self.example = FQPlainTextEdit()
-        self.zhuyinedit = FQPlainTextEdit()
+        self.example = ctrlbedit()
+        self.zhuyinedit = ctrlbedit()
         self.wordedit = FQLineEdit()
         self.wordedit.textChanged.connect(self.wordedit_t)
         self.example.hiras = None
@@ -467,13 +536,13 @@ class AnkiWindow(QWidget):
             self.example.hiras = None
 
         self.example.textChanged.connect(__)
-        self.remarks = FQPlainTextEdit()
-        recordbtn1 = statusbutton(icons=["fa.microphone", "fa.stop"], colors=["", ""])
-        recordbtn1.statuschanged.connect(
+        self.remarks = ctrlbedit()
+        recordbtn1 = statusbutton(icons=["fa.microphone", "fa.stop"])
+        recordbtn1.clicked.connect(
             functools.partial(self.startorendrecord, 1, self.audiopath)
         )
-        recordbtn2 = statusbutton(icons=["fa.microphone", "fa.stop"], colors=["", ""])
-        recordbtn2.statuschanged.connect(
+        recordbtn2 = statusbutton(icons=["fa.microphone", "fa.stop"])
+        recordbtn2.clicked.connect(
             functools.partial(self.startorendrecord, 2, self.audiopath_sentence)
         )
         self.recordbtn1 = recordbtn1
@@ -505,9 +574,12 @@ class AnkiWindow(QWidget):
         folder_open3.clicked.connect(functools.partial(self.selecfile2, self.editpath))
 
         def createadd():
-            btn = LRButton("添加")
+            btn = LPushButton("添加")
             btn.clicked.connect(functools.partial(self.errorwrap, False))
-            btn.rightclick.connect(functools.partial(self.errorwrap, True))
+            btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            btn.customContextMenuRequested.connect(
+                functools.partial(self.errorwrap, True)
+            )
             return btn
 
         layout.addLayout(
@@ -789,6 +861,7 @@ DictNodeRole = Qt.ItemDataRole.UserRole + 1
 DeterminedhasChildren = DictNodeRole + 1
 isWordNode = DeterminedhasChildren + 1
 isLabeleddWord = isWordNode + 1
+OriginText = isLabeleddWord + 1
 
 
 class DynamicTreeModel(QStandardItemModel):
@@ -818,18 +891,15 @@ class DynamicTreeModel(QStandardItemModel):
         self.setData(index, len(childs) > 0, DeterminedhasChildren)
         thisitem = self.itemFromIndex(index)
         maketuples = tuple((tuple(_) for _ in globalconfig["wordlabel"]))
-        dump = set()
+        rows = []
         for c in childs:
             if isinstance(c, str):
-                if c in dump:
-                    continue
-                dump.add(c)
                 t = c
                 has = False
             else:
                 t = c.text()
                 has = True
-            item = QStandardItem(t)
+            item = QStandardItem(t.replace("\n", ""))
             if has:
                 item.setData(c, DictNodeRole)
             else:
@@ -839,8 +909,9 @@ class DynamicTreeModel(QStandardItemModel):
                 item.setData(
                     QBrush(Qt.GlobalColor.cyan), Qt.ItemDataRole.BackgroundRole
                 )
-            thisitem.appendRow([item])
-        self.ref(index)
+            rows.append(item)
+        thisitem.appendRows(rows)
+        self.ref(index, True)
 
     def onDoubleClicked(self, index: QModelIndex):
         if not self.data(index, isWordNode):
@@ -860,21 +931,32 @@ class kpQTreeView(QTreeView):
             super().keyPressEvent(e)
 
 
-class showdiction(LMainWindow):
-    def setwordfilter(self, index=None):
-        w = self.word.text()
+class showdiction(QWidget):
+    def setwordfilter(self, index: QModelIndex = None, first=False):
         if index is None:
             item = self.model.invisibleRootItem()
             index = self.model.indexFromItem(self.model.invisibleRootItem())
         else:
             item = self.model.itemFromIndex(index)
+        w = self.word.text()
+
+        if first:
+            item.setData(item.text(), OriginText)
+            if not w:
+                item.setText(item.text() + " ({})".format((item.rowCount())))
+                return
+        cnt = 0
         for i in range(item.rowCount()):
             _item = item.child(i)
             isw = _item.data(isWordNode)
             if isw is None:
                 isw = False
-            self.tree.setRowHidden(i, index, isw and (w not in _item.text()))
+            hide = isw and (w not in _item.text())
+            self.tree.setRowHidden(i, index, hide)
+            cnt += 1 - hide
             self.setwordfilter(self.model.indexFromItem(_item))
+        if item.data(OriginText):
+            item.setText(item.data(OriginText) + " ({})".format(cnt))
 
     def showmenu(self, _):
         idx = self.tree.currentIndex()
@@ -896,7 +978,7 @@ class showdiction(LMainWindow):
         if action == search:
             self.model.onDoubleClicked(idx)
         elif copy == action:
-            winsharedutils.clipboard_set(item.text())
+            gobject.baseobject.clipboardhelper.setText.emit(item.text())
         elif action == label:
             if not idx.data(isLabeleddWord):
                 item.setData(True, isLabeleddWord)
@@ -929,48 +1011,60 @@ class showdiction(LMainWindow):
         self.word = FQLineEdit()
         self.word.returnPressed.connect(self.setwordfilter)
         wordfilter.addWidget(self.word)
-        butn = getIconButton(self.setwordfilter, "fa.filter")
+        butn = getIconButton(self.setwordfilter, "fa.search")
         wordfilter.addWidget(butn)
-
-        self.resize(400, parent.height())
-        self.setWindowTitle("查看")
-        self.setWindowIcon(qtawesome.icon("fa.book"))
+        refresh = getIconButton(self.refresh, "fa.refresh")
+        wordfilter.addWidget(refresh)
         self.tree = kpQTreeView(self)
+        self.tree.setUniformRowHeights(True)
         self.tree.setHeaderHidden(True)
         self.tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        __c = QWidget()
         __lay = QVBoxLayout()
-        __c.setLayout(__lay)
+        self.setLayout(__lay)
         __lay.setSpacing(0)
         __lay.setContentsMargins(0, 0, 0, 0)
         __lay.addLayout(wordfilter)
         __lay.addWidget(self.tree)
-        self.setCentralWidget(__c)
 
         self.model = DynamicTreeModel(self.setwordfilter)
         self.tree.setModel(self.model)
         self.tree.expanded.connect(self.model.loadChildren)
-        root = self.model.invisibleRootItem()
         self.tree.doubleClicked.connect(self.model.onDoubleClicked)
         self.tree.enterpressed.connect(self.model.onDoubleClicked)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self.showmenu)
+        self.refresh()
+
+    def refresh(self):
+        self.model.clear()
+        root = self.model.invisibleRootItem()
         rows = []
+        cishus = []
         for k in globalconfig["cishuvisrank"]:
             cishu = gobject.baseobject.cishus[k]
-
             if not hasattr(cishu, "tree"):
                 continue
+            cishus.append(cishu)
+        if len(cishus) == 1:
             try:
-                tree = cishu.tree()
+                for node in cishus[0].tree().childrens():
+                    item = QStandardItem(node.text().replace("\n", ""))
+                    item.setData(node, DictNodeRole)
+                    rows.append(item)
             except:
-                continue
-            if not tree:
-                continue
+                print_exc()
+        else:
+            for cishu in cishus:
+                try:
+                    tree = cishu.tree()
+                except:
+                    continue
+                if not tree:
+                    continue
 
-            item = QStandardItem(globalconfig["cishu"][k]["name"])
-            item.setData(tree, DictNodeRole)
-            rows.append(item)
+                item = QStandardItem(globalconfig["cishu"][k]["name"])
+                item.setData(tree, DictNodeRole)
+                rows.append(item)
         root.appendRows(rows)
         root.setData(len(rows) > 0, DeterminedhasChildren)
 
@@ -979,6 +1073,7 @@ class searchwordW(closeashidewindow):
     search_word = pyqtSignal(str, bool)
     show_dict_result = pyqtSignal(float, str, str)
     search_word_in_new_window = pyqtSignal(str)
+    ocr_once_signal = pyqtSignal()
 
     def __init__(self, parent):
         super(searchwordW, self).__init__(parent, globalconfig["sw_geo"])
@@ -986,7 +1081,21 @@ class searchwordW(closeashidewindow):
         self.search_word.connect(self.__click_word_search_function)
         self.search_word_in_new_window.connect(self.searchwinnewwindow)
         self.show_dict_result.connect(self.__show_dict_result_function)
+        self.ocr_once_signal.connect(
+            lambda: rangeselct_function(self.ocr_do_function, False)
+        )
         self.state = 0
+
+    @threader
+    def ocr_do_function(self, rect):
+        if not rect:
+            return
+        img = imageCut(0, rect[0][0], rect[0][1], rect[1][0], rect[1][1])
+        text, infotype = ocr_run(img)
+        if infotype:
+            gobject.baseobject.displayinfomessage(text, infotype)
+        else:
+            self.search_word.emit(text, False)
 
     def __load(self):
         if self.state != 0:
@@ -1035,7 +1144,7 @@ class searchwordW(closeashidewindow):
             html = self.cache_results[self.tabks[idx]]
         except:
             return
-        self.textOutput.setHtml(html)
+        self.textOutput.setHtml("<style>body{margin:0}</style>" + html)
 
     def searchwinnewwindow(self, word):
 
@@ -1047,8 +1156,7 @@ class searchwordW(closeashidewindow):
         _ = searchwordWx(self.parent())
         _.move(_.pos() + QPoint(20, 20))
         _.show()
-        _.searchtext.setText(word)
-        _.__search_by_click_search_btn()
+        _.search_word.emit(word, False)
 
     def _createnewwindowsearch(self, _):
         word = self.searchtext.text()
@@ -1078,15 +1186,15 @@ class searchwordW(closeashidewindow):
         self.vboxlayout.addLayout(self.searchlayout)
         self.searchtext = FQLineEdit()
         self.searchtext.textChanged.connect(self.ankiwindow.reset)
-        self.history_last_btn = statusbutton(
-            icons=["fa.arrow-left", "fa.arrow-left"], colors=["", ""]
+
+        self.dictbutton = statusbutton(
+            icons="fa.book", colors=["", globalconfig["buttoncolor2"]]
         )
+        self.history_last_btn = statusbutton(icons=["fa.arrow-left", "fa.arrow-left"])
         self.history_last_btn.clicked.connect(
             functools.partial(self.__move_history_search, -1)
         )
-        self.history_next_btn = statusbutton(
-            icons=["fa.arrow-right", "fa.arrow-right"], colors=["", ""]
-        )
+        self.history_next_btn = statusbutton(icons=["fa.arrow-right", "fa.arrow-right"])
         self.history_next_btn.clicked.connect(
             functools.partial(self.__move_history_search, 1)
         )
@@ -1094,6 +1202,7 @@ class searchwordW(closeashidewindow):
         self.trace_history = []
         self.trace_history_idx = -1
         self.__set_history_btn_able()
+        self.searchlayout.addWidget(self.dictbutton)
         self.searchlayout.addWidget(self.history_last_btn)
         self.searchlayout.addWidget(self.history_next_btn)
         self.searchlayout.addWidget(self.searchtext)
@@ -1115,9 +1224,9 @@ class searchwordW(closeashidewindow):
         self.searchlayout.addWidget(soundbutton)
 
         ankiconnect = statusbutton(
-            icons=["fa.adn", "fa.adn"], colors=["", globalconfig["buttoncolor2"]]
+            icons="fa.adn", colors=["", globalconfig["buttoncolor2"]]
         )
-        ankiconnect.statuschanged.connect(self.onceaddankiwindow)
+        ankiconnect.clicked.connect(self.onceaddankiwindow)
         ankiconnect.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         ankiconnect.customContextMenuRequested.connect(
             lambda _: self.ankiwindow.errorwrap()
@@ -1155,8 +1264,16 @@ class searchwordW(closeashidewindow):
         self.textOutput.on_ZoomFactorChanged.connect(
             functools.partial(globalconfig.__setitem__, "ZoomFactor")
         )
+        self.textOutput.bind(
+            "luna_search_word", lambda word: self.search_word.emit(word, False)
+        )
+        self.textOutput.bind(
+            "luna_audio_play_b64",
+            lambda b64: gobject.baseobject.audioplayer.play(
+                base64.b64decode(b64.encode()), force=True
+            ),
+        )
         self.cache_results = {}
-        self.hiding = True
 
         self.spliter = QSplitter()
 
@@ -1169,12 +1286,29 @@ class searchwordW(closeashidewindow):
         w.setLayout(tablayout)
         self.vboxlayout.addWidget(self.spliter)
         self.isfirstshowanki = True
+        self.isfirstshowdictwidget = True
         self.spliter.setOrientation(Qt.Orientation.Vertical)
 
-        self.spliter.addWidget(w)
+        self.dict_textoutput_spl = QSplitter()
+        self.dict_textoutput_spl.addWidget(w)
+        self.spliter.addWidget(self.dict_textoutput_spl)
+        self.dictbutton.clicked.connect(self.onceaddshowdictwidget)
+
+    def onceaddshowdictwidget(self, idx):
+        if idx:
+            if self.isfirstshowdictwidget:
+                self.showdictwidget = showdiction(self)
+                self.dict_textoutput_spl.insertWidget(0, self.showdictwidget)
+                self.dict_textoutput_spl.setStretchFactor(0, 0)
+                self.dict_textoutput_spl.setStretchFactor(1, 1)
+            else:
+                self.showdictwidget.show()
+        else:
+            self.showdictwidget.hide()
+        self.isfirstshowdictwidget = False
 
     def onceaddankiwindow(self, idx):
-        if idx == 1:
+        if idx:
             if self.isfirstshowanki:
                 self.spliter.addWidget(self.ankiwindow)
                 self.ankiwindow.setMinimumHeight(1)

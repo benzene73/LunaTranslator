@@ -7,9 +7,6 @@
 #include <wrl/implements.h>
 using namespace Microsoft::WRL;
 #include <WebView2.h>
-#define CHECK_FAILURE(x) \
-    if (FAILED((x)))     \
-        return x;
 
 #endif
 DECLARE_API void set_transparent_background(void *m_host)
@@ -251,10 +248,9 @@ DECLARE_API void *add_ContextMenuRequested(void *m_host, int index, const wchar_
                                     ICoreWebView2ContextMenuItem *sender,
                                     IUnknown *args)
                                 {
-                                    LPWSTR selecttext;
+                                    wil::unique_cotaskmem_string selecttext;
                                     CHECK_FAILURE(target->get_SelectionText(&selecttext));
-                                    callback(selecttext);
-                                    // 不需要free，free反而会崩溃
+                                    callback(selecttext.get());
                                     return S_OK;
                                 })
                                 .Get(),

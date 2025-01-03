@@ -52,6 +52,18 @@ from gui.dynalang import LAction, LMenu
 from gui.setting_textinput_ocr import showocrimage
 
 
+class _clipboardhelper(QObject):
+    setText = pyqtSignal(str)
+    setPixmap = pyqtSignal(QPixmap)
+    setImage = pyqtSignal(QImage)
+
+    def __init__(self):
+        super().__init__()
+        self.setPixmap.connect(QApplication.clipboard().setPixmap)
+        self.setImage.connect(QApplication.clipboard().setImage)
+        self.setText.connect(QApplication.clipboard().setText)
+
+
 class MAINUI:
     def __init__(self) -> None:
         super().__init__()
@@ -86,7 +98,7 @@ class MAINUI:
         self.autoswitchgameuid = True
         self.istriggertoupdate = False
         self.thishastranslated = True
-
+    
     @threader
     def ttsautoforward(self):
         if not globalconfig["ttsautoforward"]:
@@ -387,7 +399,9 @@ class MAINUI:
         maybehaspremt = {}
         skip_other_on_success = False
         fix_rank = globalconfig["fix_translate_rank_rank"].copy()
-        if "rengong" in self.translators:
+        if ("rengong" in self.translators) and (
+            not (is_auto_run and globalconfig["fanyi"]["rengong"].get("manual", False))
+        ):
             contentraw = self.analyzecontent(text_solved, optimization_params)
             try:
                 res = self.translators["rengong"].translate(contentraw)
@@ -399,7 +413,15 @@ class MAINUI:
                 res and self.translators["rengong"].config["skip_other_on_success"]
             )
 
-        if (not skip_other_on_success) and ("premt" in self.translators):
+        if (
+            (not skip_other_on_success)
+            and ("premt" in self.translators)
+            and (
+                not (
+                    is_auto_run and globalconfig["fanyi"]["premt"].get("manual", False)
+                )
+            )
+        ):
             contentraw = self.analyzecontent(text_solved, optimization_params)
             try:
                 maybehaspremt = self.translators["premt"].translate(contentraw)
@@ -955,8 +977,8 @@ class MAINUI:
             word = word.get("origorig", word["orig"])
 
         if globalconfig["usecopyword"]:
-            winsharedutils.clipboard_set(
-                (winsharedutils.clipboard_get() + word) if append else word
+            gobject.baseobject.clipboardhelper.setText.emit(
+                (QApplication.clipboard().text("plain")[0] + word) if append else word
             )
         if globalconfig["usesearchword"]:
             self.searchwordW.search_word.emit(word, append)
@@ -1078,6 +1100,7 @@ class MAINUI:
             fontsize=globalconfig["settingfontsize"] + 4,
             fonttype=globalconfig["settingfonttype"],
         )
+        style += "QGroupBox#notitle{ margin-top:0px;} QGroupBox#notitle:title {margin-top: 0px;}"
         self.commonstylebase.setStyleSheet(style)
         font = QFont()
         font.setFamily(globalconfig["settingfonttype"])
@@ -1132,6 +1155,7 @@ class MAINUI:
                 # ).family()
 
     def loadui(self):
+        self.clipboardhelper = _clipboardhelper()
         self.installeventfillter()
         self.parsedefaultfont()
         self.loadmetadatas()

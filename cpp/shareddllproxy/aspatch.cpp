@@ -39,7 +39,7 @@ std::wstring stolower(const std::wstring &s1)
 std::vector<DWORD> EnumerateProcesses(const std::wstring &exe)
 {
 
-    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    CHandle hSnapshot{CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)};
     if (hSnapshot == INVALID_HANDLE_VALUE)
     {
         return {};
@@ -50,7 +50,6 @@ std::vector<DWORD> EnumerateProcesses(const std::wstring &exe)
 
     if (!Process32First(hSnapshot, &pe32))
     {
-        CloseHandle(hSnapshot);
         return {};
     }
     std::vector<DWORD> pids;
@@ -60,7 +59,6 @@ std::vector<DWORD> EnumerateProcesses(const std::wstring &exe)
             pids.push_back(pe32.th32ProcessID);
     } while (Process32Next(hSnapshot, &pe32));
 
-    CloseHandle(hSnapshot);
     return pids;
 }
 enum
@@ -92,7 +90,7 @@ std::map<std::string, std::string> translation;
 std::unordered_set<DWORD> connectedpids;
 void (*Luna_Start)(ProcessEvent Connect, ProcessEvent Disconnect, void *, void *, void *, void *, HookInsertHandler hookinsert, EmbedCallback embed);
 void (*Luna_Inject)(DWORD pid, LPCWSTR basepath);
-void (*Luna_EmbedSettings)(DWORD pid, UINT32 waittime, UINT8 fontCharSet, bool fontCharSetEnabled, wchar_t *fontFamily, UINT32 keeprawtext, bool fastskipignore);
+void (*Luna_EmbedSettings)(DWORD pid, UINT32 waittime, UINT8 fontCharSet, bool fontCharSetEnabled, wchar_t *fontFamily, int displaymode, bool fastskipignore);
 void (*Luna_useembed)(ThreadParam, bool use);
 void (*Luna_embedcallback)(ThreadParam, LPCWSTR text, LPCWSTR trans);
 std::set<std::string> notranslation;
@@ -118,7 +116,7 @@ public:
         Luna_Start(
             [](DWORD pid)
             {
-                Luna_EmbedSettings(pid, 1000 * config["embedsettings"]["timeout_translate"], 2, false, config["embedsettings"]["changefont"] ? (StringToWideString(config["embedsettings"]["changefont_font"]).data()) : L"", config["embedsettings"]["keeprawtext"], false);
+                Luna_EmbedSettings(pid, 1000 * config["embedsettings"]["timeout_translate"], 2, false, config["embedsettings"]["changefont"] ? (StringToWideString(config["embedsettings"]["changefont_font"]).data()) : L"", config["embedsettings"]["displaymode"], false);
                 connectedpids.insert(pid);
             },
             [](DWORD pid)

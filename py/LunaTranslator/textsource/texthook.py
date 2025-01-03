@@ -8,17 +8,17 @@ from myutils.config import (
     savehook_new_data,
     static_data,
     findgameuidofpath,
+    getlanguse,
 )
 from textsource.textsourcebase import basetext
 from myutils.utils import (
-    checkchaos,
     getfilemd5,
     getlangtgt,
     getlanguagespace,
     kanjitrans,
     safe_escape,
 )
-from myutils.hwnd import injectdll, test_injectable, ListProcess, getpidexe
+from myutils.hwnd import injectdll, ListProcess, getpidexe
 from myutils.wrapper import threader
 from traceback import print_exc
 import subprocess, requests
@@ -207,8 +207,6 @@ class texthook(basetext):
             c_void_p,
             c_void_p,
         )
-        self.Luna_Inject = LunaHost.Luna_Inject
-        self.Luna_Inject.argtypes = DWORD, LPCWSTR
         self.Luna_CreatePipeAndCheck = LunaHost.Luna_CreatePipeAndCheck
         self.Luna_CreatePipeAndCheck.argtypes = (DWORD,)
         self.Luna_CreatePipeAndCheck.restype = c_bool
@@ -219,6 +217,8 @@ class texthook(basetext):
         self.Luna_RemoveHook.argtypes = DWORD, c_uint64
         self.Luna_Detach = LunaHost.Luna_Detach
         self.Luna_Detach.argtypes = (DWORD,)
+        self.Luna_SetLanguage = LunaHost.Luna_SetLanguage
+        self.Luna_SetLanguage.argtypes = (c_char_p,)
         self.Luna_FindHooks = LunaHost.Luna_FindHooks
         self.Luna_FindHooks.argtypes = (
             DWORD,
@@ -258,6 +258,8 @@ class texthook(basetext):
         self.keepref += procs
         ptrs = [cast(_, c_void_p).value for _ in procs]
         self.Luna_Start(*ptrs)
+        self.setsettings()
+        self.setlang()
 
     def listprocessm(self):
         cachefname = gobject.gettempdir("{}.txt".format(time.time()))
@@ -351,7 +353,6 @@ class texthook(basetext):
             except:
                 pass
         self.startsql(sqlitef)
-        self.setsettings()
         if autostart:
             autostarthookcode = savehook_new_data[gameuid]["hook"]
             needinserthookcode = savehook_new_data[gameuid]["needinserthookcode"]
@@ -386,14 +387,10 @@ class texthook(basetext):
             self.autohookmonitorthread()
 
     def start_unsafe(self, pids):
-        caninject = test_injectable(pids)
         injectpids = []
         for pid in pids:
-            if caninject and globalconfig["use_yapi"]:
-                self.Luna_Inject(pid, os.path.abspath("./files/plugins/LunaHook"))
-            else:
-                if self.Luna_CreatePipeAndCheck(pid):
-                    injectpids.append(pid)
+            if self.Luna_CreatePipeAndCheck(pid):
+                injectpids.append(pid)
         if len(injectpids):
             arch = ["32", "64"][self.is64bit]
             dll = os.path.abspath(
@@ -442,9 +439,8 @@ class texthook(basetext):
             pass
         for hookcode in self.needinserthookcode:
             self.Luna_InsertHookCode(pid, hookcode)
-        if savehook_new_data[self.gameuid]["insertpchooks_GdiGdiplusD3dx"]:
-            self.Luna_InsertPCHooks(pid, 0)
         if savehook_new_data[self.gameuid]["insertpchooks_string"]:
+            self.Luna_InsertPCHooks(pid, 0)
             self.Luna_InsertPCHooks(pid, 1)
         gobject.baseobject.displayinfomessage(
             savehook_new_data[self.gameuid]["title"], "<msg_info_refresh>"
@@ -522,7 +518,7 @@ class texthook(basetext):
                     if globalconfig["embedded"]["changefont"]
                     else ""
                 ),
-                globalconfig["embedded"]["keeprawtext"],
+                globalconfig["embedded"]["displaymode"],
                 True,
             )
 
@@ -569,6 +565,9 @@ class texthook(basetext):
             key, select, isembedable
         )
         return True
+
+    def setlang(self):
+        self.Luna_SetLanguage(getlanguse().encode())
 
     def setsettings(self):
         self.Luna_Settings(
@@ -639,11 +638,7 @@ class texthook(basetext):
         for pid in self.pids.copy():
             succ = self.Luna_InsertHookCode(pid, hookcode) and succ
         if succ == False:
-            getQMessageBox(
-                gobject.baseobject.hookselectdialog,
-                "Error",
-                "Invalie Hook Code Format!",
-            )
+            getQMessageBox(gobject.baseobject.hookselectdialog, "错误", "特殊码无效")
 
     @threader
     def delaycollectallselectedoutput(self):

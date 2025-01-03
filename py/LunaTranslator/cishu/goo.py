@@ -1,10 +1,14 @@
 import requests
 from urllib.parse import quote
-import re, os, gobject
+import re
 from cishu.cishubase import cishubase
 
 
 class goo(cishubase):
+
+    def init(self):
+        self.style = None
+        self.klass = None
 
     def search(self, word):
         url = "https://dictionary.goo.ne.jp/srch/all/{}/m1u/".format(quote(word))
@@ -12,18 +16,20 @@ class goo(cishubase):
         xx = re.findall("<section>([\\s\\S]*?)</section>", x)
 
         xx = "".join(xx).replace('href="/', 'href="https://dictionary.goo.ne.jp/')
-        temp = gobject.gettempdir("goo.css")
-        if os.path.exists(temp) == False:
-            stl = requests.get(
-                "https://dictionary.goo.ne.jp/mix/css/app.css", proxies=self.proxy
-            ).text
-            with open(temp, "w", encoding="utf8") as ff:
-                ff.write(stl)
-        else:
-            with open(temp, "r", encoding="utf8") as ff:
-                stl = ff.read()
+        if not self.style:
+            self.style, self.klass = self.parse_stylesheet(
+                (
+                    requests.get(
+                        "https://dictionary.goo.ne.jp/mix/css/app.css",
+                        proxies=self.proxy,
+                    )
+                    .text.replace("width:1004px", "")
+                    .replace("width:1024px", "")
+                    .replace("width:644px", "")
+                )
+            )
 
         if len(xx):
-            return '<div style="text-align: center;"><a href="{}">link</a><style>{}</style></div><div id="NR-main-in">{}</div>'.format(
-                url, stl, xx
+            return '<style>{}</style><div class="{}"><div id="NR-wrapper"><div id="NR-wrapper-in" class="cx">{}</div></div></div>'.format(
+                self.style, self.klass, xx
             )

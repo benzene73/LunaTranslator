@@ -3,38 +3,65 @@
 // This file is public domain software.
 
 #ifndef MWEB_BROWSER_HPP_
-#define MWEB_BROWSER_HPP_   13   // Version 13
+#define MWEB_BROWSER_HPP_ 13 // Version 13
 
 #define INITGUID
 
-class MWebBrowser :
-    public IDispatch,
-    public IOleClientSite,
-    public IOleInPlaceSite,
-    public IStorage,
-    public IServiceProvider,
-    public IHttpSecurity,
-    public IDocHostUIHandler
+class JSObject : public IDispatch
 {
+private:
+    typedef std::function<void(wchar_t **, int)> functiontype;
+    std::map<DISPID, functiontype> funcmap;
+    std::map<std::wstring, DISPID> funcnames;
+    long ref = 0;
+
 public:
+    void bindfunction(const std::wstring &, functiontype);
+
+    // IUnknown
+    virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **ppv);
+    virtual ULONG STDMETHODCALLTYPE AddRef();
+    virtual ULONG STDMETHODCALLTYPE Release();
+
+    // IDispatch
+    virtual HRESULT STDMETHODCALLTYPE GetTypeInfoCount(UINT *pctinfo);
+    virtual HRESULT STDMETHODCALLTYPE GetTypeInfo(UINT iTInfo, LCID lcid,
+                                                  ITypeInfo **ppTInfo);
+    virtual HRESULT STDMETHODCALLTYPE GetIDsOfNames(REFIID riid,
+                                                    LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId);
+    virtual HRESULT STDMETHODCALLTYPE Invoke(DISPID dispIdMember, REFIID riid,
+                                             LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult,
+                                             EXCEPINFO *pExcepInfo, UINT *puArgErr);
+};
+
+class MWebBrowser : public IDispatch,
+                    public IOleClientSite,
+                    public IOleInPlaceSite,
+                    public IStorage,
+                    public IServiceProvider,
+                    public IHttpSecurity,
+                    public IDocHostUIHandler
+{
+
+public:
+    JSObject *jsobj;
     static MWebBrowser *Create(HWND hwndParent);
-    HRESULT OnCompleted(DISPPARAMS* args);
-    
+    HRESULT OnCompleted(DISPPARAMS *args);
+
     // ---------- IDispatch ----------
     virtual HRESULT STDMETHODCALLTYPE GetTypeInfoCount(__RPC__out UINT *pctinfo) override;
     virtual HRESULT STDMETHODCALLTYPE GetTypeInfo(UINT, LCID, __RPC__deref_out_opt ITypeInfo **) override;
     virtual HRESULT STDMETHODCALLTYPE GetIDsOfNames(__RPC__in REFIID riid, __RPC__in_ecount_full(cNames) LPOLESTR *rgszNames, __RPC__in_range(0, 16384) UINT cNames, LCID lcid, __RPC__out_ecount_full(cNames) DISPID *rgDispId) override;
-    virtual HRESULT STDMETHODCALLTYPE Invoke(_In_  DISPID dispIdMember, _In_  REFIID, _In_  LCID, _In_  WORD, _In_  DISPPARAMS *pDispParams, _Out_opt_ VARIANT *pVarResult, _Out_opt_ EXCEPINFO*, _Out_opt_ UINT*) override;
-
+    virtual HRESULT STDMETHODCALLTYPE Invoke(_In_ DISPID dispIdMember, _In_ REFIID, _In_ LCID, _In_ WORD, _In_ DISPPARAMS *pDispParams, _Out_opt_ VARIANT *pVarResult, _Out_opt_ EXCEPINFO *, _Out_opt_ UINT *) override;
 
     std::wstring htmlSource;
-    IConnectionPoint* callback;
+    IConnectionPoint *callback;
     DWORD eventCookie;
 
-    RECT PixelToHIMETRIC(const RECT& rc);
+    RECT PixelToHIMETRIC(const RECT &rc);
     HWND GetControlWindow();
     HWND GetIEServerWindow();
-    void MoveWindow(const RECT& rc);
+    void MoveWindow(const RECT &rc);
 
     void GoHome();
     void GoBack();
@@ -44,20 +71,19 @@ public:
     void Refresh();
     HRESULT Navigate(const WCHAR *url = L"about:blank");
     HRESULT Navigate2(const WCHAR *url, DWORD dwFlags = 0);
-    HRESULT SetHtml(const wchar_t* html);
+    HRESULT SetHtml(const wchar_t *html);
     void Print(BOOL bBang = FALSE);
     void PrintPreview();
     void PageSetup();
     void Destroy();
     BOOL TranslateAccelerator(LPMSG pMsg);
     IWebBrowser2 *GetIWebBrowser2();
-    IHTMLDocument2 *GetIHTMLDocument2();
+    HRESULT GetIHTMLDocument2(IHTMLDocument2**);
     void AllowInsecure(BOOL bAllow);
     HRESULT Quit();
-
+    HRESULT AddCustomObject(IDispatch *custObj, std::wstring name);
     HRESULT get_Application(IDispatch **ppApplication) const;
     HRESULT get_LocationURL(BSTR *bstrURL) const;
-    HRESULT get_mimeType(BSTR *bstrMIME) const;
     HRESULT put_Silent(VARIANT_BOOL bSilent);
     BOOL is_busy() const;
     HRESULT ZoomUp();
@@ -67,8 +93,10 @@ public:
 
     // IUnknown interface
     STDMETHODIMP QueryInterface(REFIID riid, void **ppvObj);
-    STDMETHODIMP_(ULONG) AddRef();
-    STDMETHODIMP_(ULONG) Release();
+    STDMETHODIMP_(ULONG)
+    AddRef();
+    STDMETHODIMP_(ULONG)
+    Release();
 
     // IOleWindow interface
     STDMETHODIMP GetWindow(HWND *phwnd);
@@ -212,10 +240,10 @@ protected:
     HWND m_hwndParent;
     HWND m_hwndCtrl;
     HWND m_hwndIEServer;
-    IWebBrowser2 *m_web_browser2;
-    IOleObject *m_ole_object;
-    IOleInPlaceObject *m_ole_inplace_object;
-    IDocHostUIHandler *m_pDocHostUIHandler;
+    CComPtr<IWebBrowser2> m_web_browser2;
+    CComPtr<IOleObject> m_ole_object;
+    CComPtr<IOleInPlaceObject> m_ole_inplace_object;
+    CComPtr<IDocHostUIHandler> m_pDocHostUIHandler;
     RECT m_rc;
     HRESULT m_hr;
     BOOL m_bAllowInsecure;
@@ -228,8 +256,8 @@ protected:
     BOOL IsCreated() const;
 
 private:
-    MWebBrowser(const MWebBrowser&);
-    MWebBrowser& operator=(const MWebBrowser&);
+    MWebBrowser(const MWebBrowser &);
+    MWebBrowser &operator=(const MWebBrowser &);
 };
 
-#endif  // ndef MWEB_BROWSER_HPP_
+#endif // ndef MWEB_BROWSER_HPP_

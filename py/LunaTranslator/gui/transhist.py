@@ -1,6 +1,6 @@
 from qtsymbols import *
 import functools
-import qtawesome, winsharedutils, threading
+import qtawesome, gobject, threading
 from myutils.config import globalconfig
 from myutils.utils import get_time_stamp
 from gui.usefulwidget import closeashidewindow
@@ -39,7 +39,6 @@ class transhist(closeashidewindow):
         self.textOutput = textOutput
         self.setCentralWidget(self.textOutput)
 
-        self.hiding = True
 
     def showmenu(self, tb, p):
         menu = QMenu(self)
@@ -71,7 +70,7 @@ class transhist(closeashidewindow):
         if action == qingkong:
             tb.clear()
         elif action == copy:
-            winsharedutils.clipboard_set(self.textOutput.textCursor().selectedText())
+            gobject.baseobject.clipboardhelper.setText.emit(self.textOutput.textCursor().selectedText())
         elif action == baocun:
             ff = QFileDialog.getSaveFileName(self, directory="save.txt")
             if ff[0] == "":
@@ -93,9 +92,9 @@ class transhist(closeashidewindow):
 
     def refresh(self):
         with self.lock:
-            self.textOutput.clear()
-            for line in self.trace:
-                self.textOutput.appendPlainText(self.visline(line))
+            self.textOutput.setPlainText(
+                "\n".join(self.visline(line) for line in self.trace)
+            )
 
     def visline(self, line):
         ii, line = line
